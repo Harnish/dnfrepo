@@ -1,0 +1,107 @@
+// Package publish builds and signs repo metadata and swaps it in atomically.
+package publish
+
+import (
+	"context"
+	"fmt"
+	"os"
+	"os/exec"
+	"path/filepath"
+	"sort"
+	"strings"
+	"sync"
+	"time"
+
+	"dnfrepo/internal/signer"
+	"dnfrepo/internal/store"
+)
+
+type Publisher struct {
+	dataDir string
+	signer  *signer.Signer
+	mu      sync.Mutex
+	locks   map[string]*sync.Mutex
+}
+
+func New(dataDir string, s *signer.Signer) *Publisher {
+	return &Publisher{dataDir: dataDir, signer: s, locks: map[string]*sync.Mutex{}}
+}
+
+func (p *Publisher) RepoDir(slug string) string { return filepath.Join(p.dataDir, "repos", slug) }
+
+func (p *Publisher) lock(slug string) *sync.Mutex {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if p.locks[slug] == nil {
+		p.locks[slug] = &sync.Mutex{}
+	}
+	return p.locks[slug]
+}
+
+// Rebuild regenerates <repo>/repodata via createrepo_c, signs repomd.xml, and
+// repoints the repodata symlink at the new generation. Serialized per repo.
+// The previous generation is kept so in-flight client downloads don't 404.
+func (p *Publisher) Rebuild(ctx context.Context, slug string) error {
+	if !store.ValidSlug(slug) {
+		return fmt.Errorf("invalid slug %q", slug)
+	}
+	l := p.lock(slug)
+	l.Lock()
+	defer l.Unlock()
+
+	dir := p.RepoDir(slug)
+	gen := fmt.Sprintf("%d", time.Now().UnixNano())
+	build := filepath.Join(dir, ".build-"+gen)
+	if err := os.MkdirAll(build, 0o755); err != nil {
+		return err
+	}
+	defer os.RemoveAll(build)
+	out, err := exec.CommandContext(ctx, "createrepo_c", "-q", "--outputdir", build, dir).CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("createrepo_c: %v: %s", err, out)
+	}
+	newDir := filepath.Join(dir, "repodata."+gen)
+	if err := os.Rename(filepath.Join(build, "repodata"), newDir); err != nil {
+		return err
+	}
+	repomd, err := os.ReadFile(filepath.Join(newDir, "repomd.xml"))
+	if err != nil {
+		return err
+	}
+	sig, err := p.signer.SignDetached(repomd)
+	if err != nil {
+		return err
+	}
+	if err := os.WriteFile(filepath.Join(newDir, "repomd.xml.asc"), sig, 0o644); err != nil {
+		return err
+	}
+	tmpLink := filepath.Join(dir, ".link-"+gen)
+	if err := os.Symlink("repodata."+gen, tmpLink); err != nil {
+		return err
+	}
+	if err := os.Rename(tmpLink, filepath.Join(dir, "repodata")); err != nil {
+		os.Remove(tmpLink)
+		return err
+	}
+	return pruneGenerations(dir)
+}
+
+// pruneGenerations keeps the two newest repodata.<n> directories.
+func pruneGenerations(dir string) error {
+	ents, err := os.ReadDir(dir)
+	if err != nil {
+		return err
+	}
+	var gens []string
+	for _, e := range ents {
+		if e.IsDir() && strings.HasPrefix(e.Name(), "repodata.") {
+			gens = append(gens, e.Name())
+		}
+	}
+	sort.Strings(gens) // nanosecond timestamps share a digit count
+	for len(gens) > 2 {
+		os.RemoveAll(filepath.Join(dir, gens[0]))
+		gens = gens[1:]
+	}
+	return nil
+}
