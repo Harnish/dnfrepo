@@ -1,0 +1,168 @@
+// Package adminauth handles admin accounts: email verification, passwords, sessions.
+package adminauth
+
+import (
+	"context"
+	"crypto/rand"
+	"crypto/sha256"
+	"crypto/subtle"
+	"encoding/base64"
+	"encoding/hex"
+	"errors"
+	"fmt"
+	"net/http"
+	"strings"
+	"time"
+
+	"golang.org/x/crypto/argon2"
+
+	"dnfrepo/internal/config"
+	"dnfrepo/internal/store"
+)
+
+const (
+	SessionCookie = "dnfrepo_session"
+	sessionTTL    = 14 * 24 * time.Hour
+	minPassword   = 8
+)
+
+var (
+	ErrForbidden   = errors.New("forbidden")
+	ErrBadCreds    = errors.New("invalid email or password")
+	ErrBadToken    = errors.New("invalid or used token")
+	ErrShortPasswd = fmt.Errorf("password must be at least %d characters", minPassword)
+)
+
+type Service struct {
+	st        *store.Store
+	mail      Mailer
+	baseURL   string
+	bootstrap string
+}
+
+func New(st *store.Store, m Mailer, cfg config.Config) *Service {
+	return &Service{st: st, mail: m, baseURL: cfg.BaseURL, bootstrap: strings.ToLower(cfg.BootstrapAdminEmail)}
+}
+
+func randToken() string {
+	b := make([]byte, 32)
+	rand.Read(b)
+	return base64.RawURLEncoding.EncodeToString(b)
+}
+
+func hashToken(t string) string {
+	h := sha256.Sum256([]byte(t))
+	return hex.EncodeToString(h[:])
+}
+
+func hashPassword(pw string) string {
+	salt := make([]byte, 16)
+	rand.Read(salt)
+	key := argon2.IDKey([]byte(pw), salt, 1, 64*1024, 2, 32)
+	return "argon2id$" + base64.RawStdEncoding.EncodeToString(salt) + "$" + base64.RawStdEncoding.EncodeToString(key)
+}
+
+func checkPassword(pw, enc string) bool {
+	p := strings.Split(enc, "$")
+	if len(p) != 3 || p[0] != "argon2id" {
+		return false
+	}
+	salt, err1 := base64.RawStdEncoding.DecodeString(p[1])
+	want, err2 := base64.RawStdEncoding.DecodeString(p[2])
+	if err1 != nil || err2 != nil {
+		return false
+	}
+	got := argon2.IDKey([]byte(pw), salt, 1, 64*1024, 2, 32)
+	return subtle.ConstantTimeCompare(got, want) == 1
+}
+
+// invite creates or refreshes an unverified admin and mails a set-password link.
+func (s *Service) invite(ctx context.Context, email string) error {
+	email = strings.ToLower(strings.TrimSpace(email))
+	if !strings.Contains(email, "@") {
+		return fmt.Errorf("invalid email")
+	}
+	tok := randToken()
+	tag, err := s.st.Pool().Exec(ctx, `
+		INSERT INTO admins(email, verify_token_hash) VALUES($1,$2)
+		ON CONFLICT (email) DO UPDATE SET verify_token_hash=$2 WHERE admins.verified=false`, email, hashToken(tok))
+	if err != nil {
+		return err
+	}
+	if tag.RowsAffected() == 0 {
+		return fmt.Errorf("%s is already an admin", email)
+	}
+	return s.mail.Send(email, "Verify your dnfrepo admin account",
+		fmt.Sprintf("Set your password and verify your email:\n\n%s/verify?token=%s\n", s.baseURL, tok))
+}
+
+// Bootstrap creates the first admin from BOOTSTRAP_ADMIN_EMAIL when none exist.
+func (s *Service) Bootstrap(ctx context.Context) error {
+	if s.bootstrap == "" {
+		return nil
+	}
+	var n int
+	if err := s.st.Pool().QueryRow(ctx, `SELECT count(*) FROM admins`).Scan(&n); err != nil || n > 0 {
+		return err
+	}
+	return s.invite(ctx, s.bootstrap)
+}
+
+// Invite lets a verified admin invite another.
+func (s *Service) Invite(ctx context.Context, actor, email string) error {
+	var ok bool
+	if err := s.st.Pool().QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM admins WHERE email=$1 AND verified)`, strings.ToLower(actor)).Scan(&ok); err != nil {
+		return err
+	}
+	if !ok {
+		return ErrForbidden
+	}
+	return s.invite(ctx, email)
+}
+
+func (s *Service) VerifyAndSetPassword(ctx context.Context, token, password string) error {
+	if len(password) < minPassword {
+		return ErrShortPasswd
+	}
+	tag, err := s.st.Pool().Exec(ctx, `
+		UPDATE admins SET verified=true, password_hash=$2, verify_token_hash=NULL
+		WHERE verify_token_hash=$1`, hashToken(token), hashPassword(password))
+	if err != nil {
+		return err
+	}
+	if tag.RowsAffected() == 0 {
+		return ErrBadToken
+	}
+	return nil
+}
+
+func (s *Service) Login(ctx context.Context, email, password string) (string, error) {
+	var id int64
+	var hash *string
+	var verified bool
+	err := s.st.Pool().QueryRow(ctx, `SELECT id, password_hash, verified FROM admins WHERE email=$1`, strings.ToLower(email)).Scan(&id, &hash, &verified)
+	if err != nil || !verified || hash == nil || !checkPassword(password, *hash) {
+		return "", ErrBadCreds
+	}
+	tok := randToken()
+	_, err = s.st.Pool().Exec(ctx, `INSERT INTO admin_sessions(token_hash, admin_id, expires_at) VALUES($1,$2,$3)`,
+		hashToken(tok), id, time.Now().Add(sessionTTL))
+	return tok, err
+}
+
+func (s *Service) Logout(ctx context.Context, token string) {
+	s.st.Pool().Exec(ctx, `DELETE FROM admin_sessions WHERE token_hash=$1`, hashToken(token))
+}
+
+// Authenticate returns the signed-in admin's email from the session cookie.
+func (s *Service) Authenticate(r *http.Request) (string, bool) {
+	c, err := r.Cookie(SessionCookie)
+	if err != nil || c.Value == "" {
+		return "", false
+	}
+	var email string
+	err = s.st.Pool().QueryRow(r.Context(), `
+		SELECT a.email FROM admin_sessions s JOIN admins a ON a.id=s.admin_id
+		WHERE s.token_hash=$1 AND s.expires_at > now()`, hashToken(c.Value)).Scan(&email)
+	return email, err == nil
+}
