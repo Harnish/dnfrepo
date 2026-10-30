@@ -97,3 +97,28 @@ func (s *Store) ListAudit(ctx context.Context, repoID int64, limit int) ([]Audit
 	}
 	return out, rows.Err()
 }
+
+// AddPackagesAudited inserts pkgs into repoID and one audit event per package, in one transaction.
+// detail[i] is the audit detail for pkgs[i].
+func (s *Store) AddPackagesAudited(ctx context.Context, repoID int64, pkgs []Package, actor, action string, detail []string) error {
+	tx, err := s.pool.Begin(ctx)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback(ctx)
+	for i, p := range pkgs {
+		_, err := tx.Exec(ctx, `
+			INSERT INTO packages(repo_id, filename, name, version, release, arch, sha256, size)
+			VALUES($1,$2,$3,$4,$5,$6,$7,$8)`, repoID, p.Filename, p.Name, p.Version, p.Release, p.Arch, p.SHA256, p.Size)
+		if pgCode(err) == "23505" {
+			return ErrExists
+		}
+		if err != nil {
+			return err
+		}
+		if _, err := tx.Exec(ctx, `INSERT INTO audit_events(repo_id, actor, action, detail) VALUES($1,$2,$3,$4)`, repoID, actor, action, detail[i]); err != nil {
+			return err
+		}
+	}
+	return tx.Commit(ctx)
+}

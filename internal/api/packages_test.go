@@ -38,7 +38,9 @@ func pkgEnv(t *testing.T) (*env, string) {
 	dir := t.TempDir()
 	pl := &pipeline.Service{Store: e.St, Publisher: nopPub{dir}, MaxBytes: 1 << 20}
 	(&Repos{Store: e.St, DataDir: dir}).Routes(e.Mux)
-	(&Packages{Pipeline: pl, Actor: func(*http.Request) string { return "admin@x.org" }}).Routes(e.Mux)
+	pk := &Packages{Pipeline: pl, Actor: func(*http.Request) string { return "admin@x.org" }}
+	pk.Routes(e.Mux)
+	pk.RoutesPromote(e.Mux)
 	return e, dir
 }
 
@@ -79,5 +81,20 @@ func TestUploadToLaterStageIs409AndNonRPMIs400(t *testing.T) {
 		if _, err := os.Stat(p); err == nil {
 			t.Fatalf("file escaped repo dir: %s", p)
 		}
+	}
+}
+
+func TestPromoteViaAPI(t *testing.T) {
+	e, _ := pkgEnv(t)
+	e.Do("POST", "/api/repos", `{"slug":"dev","name":"Dev","mode":"public"}`)
+	e.Do("POST", "/api/repos", `{"slug":"test","name":"Test","mode":"public","previous":"dev"}`)
+	if w := e.Do("POST", "/api/repos/dev/promote", `{"filenames":[]}`); w.Code != 400 {
+		t.Fatalf("empty: %d %s", w.Code, w.Body)
+	}
+	if w := e.Do("POST", "/api/repos/test/promote", `{"filenames":["x.rpm"]}`); w.Code != 409 {
+		t.Fatalf("no next stage: %d %s", w.Code, w.Body)
+	}
+	if w := e.Do("POST", "/api/repos/dev/promote", `{"filenames":["ghost.rpm"]}`); w.Code != 404 {
+		t.Fatalf("missing: %d %s", w.Code, w.Body)
 	}
 }

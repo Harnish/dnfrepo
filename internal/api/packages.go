@@ -100,3 +100,30 @@ func (a *Packages) Routes(mux *http.ServeMux) {
 		writeJSON(w, 200, map[string]string{"status": "deleted"})
 	})
 }
+
+// RoutesPromote registers POST /api/repos/{slug}/promote.
+func (a *Packages) RoutesPromote(mux *http.ServeMux) {
+	mux.HandleFunc("POST /api/repos/{slug}/promote", func(w http.ResponseWriter, r *http.Request) {
+		var in struct{ Filenames []string }
+		if !decode(w, r, &in) {
+			return
+		}
+		res, err := a.Pipeline.Promote(r.Context(), r.PathValue("slug"), in.Filenames, a.Actor(r))
+		switch {
+		case errors.Is(err, pipeline.ErrNoNextStage), errors.Is(err, pipeline.ErrConflict):
+			errJSON(w, 409, err.Error())
+		case errors.Is(err, pipeline.ErrEmptyPromotion):
+			errJSON(w, 400, err.Error())
+		case err != nil:
+			pkgErr(w, err)
+		default:
+			if res.Promoted == nil {
+				res.Promoted = []string{}
+			}
+			if res.Skipped == nil {
+				res.Skipped = []string{}
+			}
+			writeJSON(w, 200, map[string]any{"to": res.To, "promoted": res.Promoted, "skipped": res.Skipped})
+		}
+	})
+}
