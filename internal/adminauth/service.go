@@ -57,16 +57,32 @@ var (
 	dummyHash string
 )
 
-func (s *Service) hash(pw string) string {
-	s.hashSem <- struct{}{}
-	defer func() { <-s.hashSem }()
-	return hashPassword(pw)
+// acquire takes an argon2 slot, giving up if ctx ends first.
+func (s *Service) acquire(ctx context.Context) (release func(), err error) {
+	select {
+	case s.hashSem <- struct{}{}:
+		return func() { <-s.hashSem }, nil
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	}
 }
 
-func (s *Service) check(pw, enc string) bool {
-	s.hashSem <- struct{}{}
-	defer func() { <-s.hashSem }()
-	return checkPassword(pw, enc)
+func (s *Service) hash(ctx context.Context, pw string) (string, error) {
+	release, err := s.acquire(ctx)
+	if err != nil {
+		return "", err
+	}
+	defer release()
+	return hashPassword(pw), nil
+}
+
+func (s *Service) check(ctx context.Context, pw, enc string) (bool, error) {
+	release, err := s.acquire(ctx)
+	if err != nil {
+		return false, err
+	}
+	defer release()
+	return checkPassword(pw, enc), nil
 }
 
 func randToken() string {
@@ -149,9 +165,21 @@ func (s *Service) VerifyAndSetPassword(ctx context.Context, token, password stri
 	if len(password) < minPassword {
 		return ErrShortPasswd
 	}
+	// check the token first so garbage tokens never spend an argon2 slot
+	var known bool
+	if err := s.st.Pool().QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM admins WHERE verify_token_hash=$1)`, hashToken(token)).Scan(&known); err != nil {
+		return err
+	}
+	if !known {
+		return ErrBadToken
+	}
+	pwHash, err := s.hash(ctx, password)
+	if err != nil {
+		return err
+	}
 	tag, err := s.st.Pool().Exec(ctx, `
 		UPDATE admins SET verified=true, password_hash=$2, verify_token_hash=NULL
-		WHERE verify_token_hash=$1`, hashToken(token), s.hash(password))
+		WHERE verify_token_hash=$1`, hashToken(token), pwHash)
 	if err != nil {
 		return err
 	}
@@ -168,10 +196,16 @@ func (s *Service) Login(ctx context.Context, email, password string) (string, er
 	err := s.st.Pool().QueryRow(ctx, `SELECT id, password_hash, verified FROM admins WHERE email=$1`, strings.ToLower(email)).Scan(&id, &hash, &verified)
 	if err != nil || hash == nil {
 		dummyOnce.Do(func() { dummyHash = hashPassword("dummy-password") })
-		s.check(password, dummyHash)
+		if _, err := s.check(ctx, password, dummyHash); err != nil {
+			return "", err
+		}
 		return "", ErrBadCreds
 	}
-	if ok := s.check(password, *hash); !ok || !verified {
+	ok, err := s.check(ctx, password, *hash)
+	if err != nil {
+		return "", err
+	}
+	if !ok || !verified {
 		return "", ErrBadCreds
 	}
 	tok := randToken()

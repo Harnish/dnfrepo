@@ -2,6 +2,7 @@ package adminauth
 
 import (
 	"encoding/json"
+	"errors"
 	"net/http"
 	"strings"
 
@@ -57,8 +58,8 @@ func CSRF(next http.Handler) http.Handler {
 func (s *Service) PublicRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("POST /api/auth/login", func(w http.ResponseWriter, r *http.Request) {
 		ip := access.ClientIP(r, s.trusted)
-		if s.th.Blocked(ip) {
-			errJSON(w, 429, "too many failed attempts; try again later")
+		if !s.th.Attempt(ip) { // counted before the password check so parallel bursts can't outrun it
+			errJSON(w, 429, "too many attempts; try again later")
 			return
 		}
 		var in struct{ Email, Password string }
@@ -66,16 +67,24 @@ func (s *Service) PublicRoutes(mux *http.ServeMux) {
 			return
 		}
 		tok, err := s.Login(r.Context(), in.Email, in.Password)
-		if err != nil {
-			s.th.Fail(ip)
+		if errors.Is(err, ErrBadCreds) {
 			errJSON(w, 401, err.Error())
 			return
+		} else if err != nil {
+			errJSON(w, 503, "try again")
+			return
 		}
+		s.th.Reset(ip)
 		http.SetCookie(w, &http.Cookie{Name: SessionCookie, Value: tok, Path: "/", HttpOnly: true,
 			SameSite: http.SameSiteLaxMode, Secure: strings.HasPrefix(s.baseURL, "https://"), MaxAge: int(sessionTTL.Seconds())})
 		writeJSON(w, 200, map[string]string{"email": strings.ToLower(in.Email)})
 	})
 	mux.HandleFunc("POST /api/auth/verify", func(w http.ResponseWriter, r *http.Request) {
+		ip := access.ClientIP(r, s.trusted)
+		if !s.th.Attempt(ip) {
+			errJSON(w, 429, "too many attempts; try again later")
+			return
+		}
 		var in struct{ Token, Password string }
 		if !decodeBody(w, r, &in) {
 			return
@@ -84,6 +93,7 @@ func (s *Service) PublicRoutes(mux *http.ServeMux) {
 			errJSON(w, 400, err.Error())
 			return
 		}
+		s.th.Reset(ip)
 		writeJSON(w, 200, map[string]string{"status": "verified"})
 	})
 }

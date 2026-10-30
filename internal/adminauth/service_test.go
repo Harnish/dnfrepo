@@ -4,6 +4,7 @@ import (
 	"context"
 	"regexp"
 	"testing"
+	"time"
 
 	"dnfrepo/internal/config"
 	"dnfrepo/internal/store/storetest"
@@ -116,5 +117,40 @@ func TestShortPasswordRejected(t *testing.T) {
 	s.Bootstrap(ctx)
 	if err := s.VerifyAndSetPassword(ctx, fm.lastToken(t), "short"); err == nil {
 		t.Fatal("short password should fail")
+	}
+}
+
+func TestBadVerifyTokenDoesNotTakeHashSlot(t *testing.T) {
+	s, _ := newSvc(t)
+	for i := 0; i < cap(s.hashSem); i++ {
+		s.hashSem <- struct{}{} // every argon2 slot busy
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 300*time.Millisecond)
+	defer cancel()
+	done := make(chan error, 1)
+	go func() { done <- s.VerifyAndSetPassword(ctx, "garbage-token", "long-enough-pw") }()
+	select {
+	case err := <-done:
+		if err != ErrBadToken {
+			t.Fatalf("got %v", err)
+		}
+	case <-time.After(250 * time.Millisecond):
+		t.Fatal("bad token waited for a hash slot")
+	}
+}
+
+func TestLoginHonoursContextWhileWaitingForHashSlot(t *testing.T) {
+	s, fm := newSvc(t)
+	s.Bootstrap(context.Background())
+	s.VerifyAndSetPassword(context.Background(), fm.lastToken(t), "correct-horse")
+	for i := 0; i < cap(s.hashSem); i++ {
+		s.hashSem <- struct{}{}
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
+	defer cancel()
+	start := time.Now()
+	_, err := s.Login(ctx, "a@x.org", "correct-horse")
+	if err == nil || time.Since(start) > time.Second {
+		t.Fatalf("err=%v after %v", err, time.Since(start))
 	}
 }

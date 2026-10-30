@@ -54,3 +54,33 @@ func (t *Throttle) Fail(ip netip.Addr) {
 		}
 	}
 }
+
+// Attempt counts an attempt before it is verified and reports whether it may proceed.
+// Counting up front (not after the check) keeps a parallel burst from slipping past the limit.
+// Call Reset when the attempt succeeds.
+func (t *Throttle) Attempt(ip netip.Addr) bool {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	n := t.now()
+	e := t.m[ip]
+	if e != nil && n.Before(e.blockedUntil) {
+		return false
+	}
+	if e == nil || n.Sub(e.start) > window {
+		e = &entry{start: n}
+		t.m[ip] = e
+	}
+	e.count++
+	if e.count > maxFailures {
+		e.blockedUntil = n.Add(window)
+		return false
+	}
+	return true
+}
+
+// Reset forgets an IP's attempts (after a successful login).
+func (t *Throttle) Reset(ip netip.Addr) {
+	t.mu.Lock()
+	delete(t.m, ip)
+	t.mu.Unlock()
+}
