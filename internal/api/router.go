@@ -37,6 +37,7 @@ func Router(d Deps) http.Handler {
 	d.RepoUsers.Routes(admin)
 	d.Packages.Routes(admin)
 	d.Packages.RoutesPromote(admin)
+	d.Packages.RoutesAudit(admin)
 	d.Sources.Routes(admin)
 	top.Handle("/api/", d.Admin.RequireAdmin(adminauth.CSRF(admin)))
 

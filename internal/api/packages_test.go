@@ -41,6 +41,7 @@ func pkgEnv(t *testing.T) (*env, string) {
 	pk := &Packages{Pipeline: pl, Actor: func(*http.Request) string { return "admin@x.org" }}
 	pk.Routes(e.Mux)
 	pk.RoutesPromote(e.Mux)
+	pk.RoutesAudit(e.Mux)
 	return e, dir
 }
 
@@ -96,5 +97,19 @@ func TestPromoteViaAPI(t *testing.T) {
 	}
 	if w := e.Do("POST", "/api/repos/dev/promote", `{"filenames":["ghost.rpm"]}`); w.Code != 404 {
 		t.Fatalf("missing: %d %s", w.Code, w.Body)
+	}
+}
+
+func TestAuditEndpoint(t *testing.T) {
+	e, _ := pkgEnv(t)
+	e.Do("POST", "/api/repos", `{"slug":"dev","name":"Dev","mode":"public"}`)
+	rpm, _ := os.ReadFile("../rpmmeta/testdata/hello-1.2.3-4.noarch.rpm")
+	upload(e, "dev", "hello-1.2.3-4.noarch.rpm", rpm)
+	w := e.Do("GET", "/api/repos/dev/audit", "")
+	if w.Code != 200 || !bytes.Contains(w.Body.Bytes(), []byte(`"action":"uploaded"`)) || !bytes.Contains(w.Body.Bytes(), []byte(`hello-1.2.3-4.noarch.rpm`)) {
+		t.Fatalf("audit: %d %s", w.Code, w.Body)
+	}
+	if w := e.Do("GET", "/api/repos/ghost/audit", ""); w.Code != 404 {
+		t.Fatalf("unknown repo: %d", w.Code)
 	}
 }

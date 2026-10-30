@@ -58,7 +58,7 @@ var adminRoutes = []struct{ method, path string }{
 	{"GET", "/api/repos/dev/users"}, {"PUT", "/api/repos/dev/users"},
 	{"GET", "/api/repo-users"}, {"POST", "/api/repo-users"}, {"DELETE", "/api/repo-users/1"},
 	{"GET", "/api/repos/dev/packages"}, {"POST", "/api/repos/dev/packages"},
-	{"DELETE", "/api/repos/dev/packages/x.rpm"}, {"POST", "/api/repos/dev/promote"},
+	{"DELETE", "/api/repos/dev/packages/x.rpm"}, {"POST", "/api/repos/dev/promote"}, {"GET", "/api/repos/dev/audit"},
 	{"GET", "/api/repos/dev/sources"}, {"POST", "/api/repos/dev/sources"},
 	{"DELETE", "/api/sources/1"}, {"POST", "/api/sources/1/run"},
 }

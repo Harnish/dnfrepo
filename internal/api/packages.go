@@ -127,3 +127,24 @@ func (a *Packages) RoutesPromote(mux *http.ServeMux) {
 		}
 	})
 }
+
+// RoutesAudit registers GET /api/repos/{slug}/audit (newest 100 events).
+func (a *Packages) RoutesAudit(mux *http.ServeMux) {
+	mux.HandleFunc("GET /api/repos/{slug}/audit", func(w http.ResponseWriter, r *http.Request) {
+		repo, err := a.Pipeline.Store.RepoBySlug(r.Context(), r.PathValue("slug"))
+		if err != nil {
+			pkgErr(w, err)
+			return
+		}
+		evs, err := a.Pipeline.Store.ListAudit(r.Context(), repo.ID, 100)
+		if err != nil {
+			pkgErr(w, err)
+			return
+		}
+		out := []map[string]any{}
+		for _, e := range evs {
+			out = append(out, map[string]any{"id": e.ID, "actor": e.Actor, "action": e.Action, "detail": e.Detail, "at": e.At.UTC().Format("2006-01-02T15:04:05Z")})
+		}
+		writeJSON(w, 200, out)
+	})
+}
