@@ -11,6 +11,9 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"strings"
+	"sync"
+	"time"
 
 	"dnfrepo/internal/rpmmeta"
 	"dnfrepo/internal/store"
@@ -35,6 +38,25 @@ type Service struct {
 	Store     *store.Store
 	Publisher Publisher
 	MaxBytes  int64
+
+	locks sync.Map // slug -> *sync.Mutex
+}
+
+// lock serializes file placement, DB writes, and rebuild for one repo, so a rebuild
+// never publishes files whose operation has not committed (or has been rolled back).
+func (s *Service) lock(slug string) (unlock func()) {
+	m, _ := s.locks.LoadOrStore(slug, &sync.Mutex{})
+	mu := m.(*sync.Mutex)
+	mu.Lock()
+	return mu.Unlock
+}
+
+// rebuild runs detached from the caller's cancellation: once an operation has committed,
+// a client disconnect must not leave the published metadata stale.
+func (s *Service) rebuild(ctx context.Context, slug string) error {
+	rctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 10*time.Minute)
+	defer cancel()
+	return s.Publisher.Rebuild(rctx, slug)
 }
 
 func (s *Service) Upload(ctx context.Context, slug, filename string, r io.Reader, actor string) (store.Package, error) {
@@ -48,6 +70,7 @@ func (s *Service) Upload(ctx context.Context, slug, filename string, r io.Reader
 	if repo.PreviousID != nil {
 		return store.Package{}, ErrNotFirstStage
 	}
+	defer s.lock(slug)()
 	dir := s.Publisher.RepoDir(slug)
 	tmp, err := os.CreateTemp(dir, ".upload-*")
 	if err != nil {
@@ -79,16 +102,19 @@ func (s *Service) Upload(ctx context.Context, slug, filename string, r io.Reader
 		}
 		return store.Package{}, err
 	}
-	pkg, err := s.Store.AddPackage(ctx, store.Package{
+	pkg, err := s.Store.AddPackageFirstStage(ctx, store.Package{
 		RepoID: repo.ID, Filename: filename, Name: meta.Name, Version: meta.Version,
 		Release: meta.Release, Arch: meta.Arch, SHA256: hex.EncodeToString(h.Sum(nil)), Size: n,
 	})
 	if err != nil {
 		os.Remove(final)
+		if errors.Is(err, store.ErrLaterStage) {
+			err = ErrNotFirstStage
+		}
 		return store.Package{}, err
 	}
 	s.Store.AddAudit(ctx, repo.ID, actor, "uploaded", filename)
-	if err := s.Publisher.Rebuild(ctx, slug); err != nil {
+	if err := s.rebuild(ctx, slug); err != nil {
 		return pkg, fmt.Errorf("package stored but metadata rebuild failed: %w", err)
 	}
 	return pkg, nil
@@ -98,6 +124,7 @@ func (s *Service) Delete(ctx context.Context, slug, filename, actor string) erro
 	if !filenameRe.MatchString(filename) {
 		return ErrBadFilename
 	}
+	defer s.lock(slug)()
 	repo, err := s.Store.RepoBySlug(ctx, slug)
 	if err != nil {
 		return err
@@ -109,5 +136,56 @@ func (s *Service) Delete(ctx context.Context, slug, filename, actor string) erro
 		return err
 	}
 	s.Store.AddAudit(ctx, repo.ID, actor, "deleted", filename)
-	return s.Publisher.Rebuild(ctx, slug)
+	return s.rebuild(ctx, slug)
+}
+
+// QuarantineOrphans moves rpm files that have no package row (left by a crash between file
+// placement and DB commit) to <data>/orphans/<slug>/, removes leftover upload/promote temp
+// files, and rebuilds if anything was moved. It returns the moved filenames.
+func (s *Service) QuarantineOrphans(ctx context.Context, slug string) ([]string, error) {
+	defer s.lock(slug)()
+	repo, err := s.Store.RepoBySlug(ctx, slug)
+	if err != nil {
+		return nil, err
+	}
+	dir := s.Publisher.RepoDir(slug)
+	ents, err := os.ReadDir(dir)
+	if err != nil {
+		return nil, err
+	}
+	var moved []string
+	for _, e := range ents {
+		name := e.Name()
+		if !e.Type().IsRegular() {
+			continue
+		}
+		if strings.HasPrefix(name, ".upload-") || strings.HasPrefix(name, ".promote-") {
+			os.Remove(filepath.Join(dir, name))
+			continue
+		}
+		if !filenameRe.MatchString(name) {
+			continue
+		}
+		if _, err := s.Store.PackageByFilename(ctx, repo.ID, name); err == nil {
+			continue
+		} else if !errors.Is(err, store.ErrNotFound) {
+			return moved, err
+		}
+		qdir := filepath.Join(filepath.Dir(filepath.Dir(dir)), "orphans", slug)
+		if err := os.MkdirAll(qdir, 0o755); err != nil {
+			return moved, err
+		}
+		dst := filepath.Join(qdir, fmt.Sprintf("%s.%d", name, time.Now().UnixNano()))
+		if _, err := os.Stat(filepath.Join(qdir, name)); os.IsNotExist(err) {
+			dst = filepath.Join(qdir, name)
+		}
+		if err := os.Rename(filepath.Join(dir, name), dst); err != nil {
+			return moved, err
+		}
+		moved = append(moved, name)
+	}
+	if len(moved) > 0 {
+		return moved, s.rebuild(ctx, slug)
+	}
+	return moved, nil
 }

@@ -11,11 +11,14 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"net/netip"
 	"strings"
+	"sync"
 	"time"
 
 	"golang.org/x/crypto/argon2"
 
+	"dnfrepo/internal/access"
 	"dnfrepo/internal/config"
 	"dnfrepo/internal/store"
 )
@@ -38,10 +41,32 @@ type Service struct {
 	mail      Mailer
 	baseURL   string
 	bootstrap string
+	trusted   []netip.Prefix
+	th        *access.Throttle // failed-login throttle, per client IP
+	hashSem   chan struct{}    // bounds concurrent argon2 runs (64 MiB each)
 }
 
 func New(st *store.Store, m Mailer, cfg config.Config) *Service {
-	return &Service{st: st, mail: m, baseURL: cfg.BaseURL, bootstrap: strings.ToLower(cfg.BootstrapAdminEmail)}
+	return &Service{st: st, mail: m, baseURL: cfg.BaseURL, bootstrap: strings.ToLower(cfg.BootstrapAdminEmail),
+		trusted: cfg.TrustedProxies, th: access.NewThrottle(), hashSem: make(chan struct{}, 4)}
+}
+
+// dummyHash is checked when the email is unknown so unknown and known emails take equally long.
+var (
+	dummyOnce sync.Once
+	dummyHash string
+)
+
+func (s *Service) hash(pw string) string {
+	s.hashSem <- struct{}{}
+	defer func() { <-s.hashSem }()
+	return hashPassword(pw)
+}
+
+func (s *Service) check(pw, enc string) bool {
+	s.hashSem <- struct{}{}
+	defer func() { <-s.hashSem }()
+	return checkPassword(pw, enc)
 }
 
 func randToken() string {
@@ -126,7 +151,7 @@ func (s *Service) VerifyAndSetPassword(ctx context.Context, token, password stri
 	}
 	tag, err := s.st.Pool().Exec(ctx, `
 		UPDATE admins SET verified=true, password_hash=$2, verify_token_hash=NULL
-		WHERE verify_token_hash=$1`, hashToken(token), hashPassword(password))
+		WHERE verify_token_hash=$1`, hashToken(token), s.hash(password))
 	if err != nil {
 		return err
 	}
@@ -141,7 +166,12 @@ func (s *Service) Login(ctx context.Context, email, password string) (string, er
 	var hash *string
 	var verified bool
 	err := s.st.Pool().QueryRow(ctx, `SELECT id, password_hash, verified FROM admins WHERE email=$1`, strings.ToLower(email)).Scan(&id, &hash, &verified)
-	if err != nil || !verified || hash == nil || !checkPassword(password, *hash) {
+	if err != nil || hash == nil {
+		dummyOnce.Do(func() { dummyHash = hashPassword("dummy-password") })
+		s.check(password, dummyHash)
+		return "", ErrBadCreds
+	}
+	if ok := s.check(password, *hash); !ok || !verified {
 		return "", ErrBadCreds
 	}
 	tok := randToken()

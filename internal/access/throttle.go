@@ -11,8 +11,8 @@ const (
 	window      = 5 * time.Minute
 )
 
-// throttle blocks an IP for `window` after maxFailures bad Basic-auth attempts within `window`.
-type throttle struct {
+// Throttle blocks an IP for `window` after maxFailures bad Basic-auth attempts within `window`.
+type Throttle struct {
 	mu  sync.Mutex
 	now func() time.Time
 	m   map[netip.Addr]*entry
@@ -24,16 +24,16 @@ type entry struct {
 	blockedUntil time.Time
 }
 
-func newThrottle() *throttle { return &throttle{now: time.Now, m: map[netip.Addr]*entry{}} }
+func NewThrottle() *Throttle { return &Throttle{now: time.Now, m: map[netip.Addr]*entry{}} }
 
-func (t *throttle) blocked(ip netip.Addr) bool {
+func (t *Throttle) Blocked(ip netip.Addr) bool {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	e := t.m[ip]
 	return e != nil && t.now().Before(e.blockedUntil)
 }
 
-func (t *throttle) fail(ip netip.Addr) {
+func (t *Throttle) Fail(ip netip.Addr) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	n := t.now()

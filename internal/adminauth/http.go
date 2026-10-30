@@ -4,7 +4,18 @@ import (
 	"encoding/json"
 	"net/http"
 	"strings"
+
+	"dnfrepo/internal/access"
 )
+
+// decodeBody reads a small JSON body (64 KiB max).
+func decodeBody(w http.ResponseWriter, r *http.Request, v any) bool {
+	if json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<16)).Decode(v) != nil {
+		errJSON(w, http.StatusBadRequest, "bad json")
+		return false
+	}
+	return true
+}
 
 func writeJSON(w http.ResponseWriter, code int, v any) {
 	w.Header().Set("Content-Type", "application/json")
@@ -45,13 +56,18 @@ func CSRF(next http.Handler) http.Handler {
 // PublicRoutes registers the endpoints usable without a session.
 func (s *Service) PublicRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("POST /api/auth/login", func(w http.ResponseWriter, r *http.Request) {
+		ip := access.ClientIP(r, s.trusted)
+		if s.th.Blocked(ip) {
+			errJSON(w, 429, "too many failed attempts; try again later")
+			return
+		}
 		var in struct{ Email, Password string }
-		if json.NewDecoder(r.Body).Decode(&in) != nil {
-			errJSON(w, 400, "bad json")
+		if !decodeBody(w, r, &in) {
 			return
 		}
 		tok, err := s.Login(r.Context(), in.Email, in.Password)
 		if err != nil {
+			s.th.Fail(ip)
 			errJSON(w, 401, err.Error())
 			return
 		}
@@ -61,8 +77,7 @@ func (s *Service) PublicRoutes(mux *http.ServeMux) {
 	})
 	mux.HandleFunc("POST /api/auth/verify", func(w http.ResponseWriter, r *http.Request) {
 		var in struct{ Token, Password string }
-		if json.NewDecoder(r.Body).Decode(&in) != nil {
-			errJSON(w, 400, "bad json")
+		if !decodeBody(w, r, &in) {
 			return
 		}
 		if err := s.VerifyAndSetPassword(r.Context(), in.Token, in.Password); err != nil {
@@ -88,8 +103,7 @@ func (s *Service) AdminRoutes(mux *http.ServeMux) {
 	})
 	mux.HandleFunc("POST /api/admins/invite", func(w http.ResponseWriter, r *http.Request) {
 		var in struct{ Email string }
-		if json.NewDecoder(r.Body).Decode(&in) != nil {
-			errJSON(w, 400, "bad json")
+		if !decodeBody(w, r, &in) {
 			return
 		}
 		actor, _ := s.Authenticate(r)

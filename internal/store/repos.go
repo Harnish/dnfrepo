@@ -27,6 +27,9 @@ var (
 	ErrChain    = errors.New("invalid pipeline link")
 	ErrInChain  = errors.New("repo is part of a pipeline; unlink it first")
 	ErrExists   = errors.New("already exists")
+
+	ErrHasContent = errors.New("repo already has packages or sources; only an empty repo can be linked behind another")
+	ErrLaterStage = errors.New("repo is a later pipeline stage")
 )
 
 var slugRe = regexp.MustCompile(`^[a-z0-9][a-z0-9-]{0,62}$`)
@@ -134,32 +137,55 @@ func (s *Store) UpdateRepo(ctx context.Context, id int64, name string, mode Acce
 	return err
 }
 
-// SetPrevious links (or, with nil, unlinks) a repo into a pipeline.
+// SetPrevious links (or, with nil, unlinks) a repo into a pipeline. Linking is allowed
+// only for a repo with no packages and no sources, so nothing can become a later-stage
+// package without having been promoted. All link changes are serialized.
 func (s *Store) SetPrevious(ctx context.Context, id int64, previousID *int64) error {
+	tx, err := s.pool.Begin(ctx)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback(ctx)
+	if _, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock(7001)`); err != nil {
+		return err
+	}
+	var locked int64
+	if err := tx.QueryRow(ctx, `SELECT id FROM repos WHERE id=$1 FOR UPDATE`, id).Scan(&locked); err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return ErrNotFound
+		}
+		return err
+	}
 	if previousID != nil {
+		var n int
+		if err := tx.QueryRow(ctx, `SELECT (SELECT count(*) FROM packages WHERE repo_id=$1) + (SELECT count(*) FROM sources WHERE repo_id=$1)`, id).Scan(&n); err != nil {
+			return err
+		}
+		if n > 0 {
+			return ErrHasContent
+		}
 		// walk up from the candidate; reaching id means a cycle
 		for cur := previousID; cur != nil; {
 			if *cur == id {
 				return ErrChain
 			}
-			r, err := s.RepoByID(ctx, *cur)
-			if err != nil {
-				if errors.Is(err, ErrNotFound) {
+			var up *int64
+			if err := tx.QueryRow(ctx, `SELECT previous_id FROM repos WHERE id=$1`, *cur).Scan(&up); err != nil {
+				if errors.Is(err, pgx.ErrNoRows) {
 					return ErrChain
 				}
 				return err
 			}
-			cur = r.PreviousID
+			cur = up
 		}
 	}
-	tag, err := s.pool.Exec(ctx, `UPDATE repos SET previous_id=$2 WHERE id=$1`, id, previousID)
-	if pgCode(err) == "23505" {
-		return ErrChain
+	if _, err := tx.Exec(ctx, `UPDATE repos SET previous_id=$2 WHERE id=$1`, id, previousID); err != nil {
+		if pgCode(err) == "23505" {
+			return ErrChain
+		}
+		return err
 	}
-	if err == nil && tag.RowsAffected() == 0 {
-		return ErrNotFound
-	}
-	return err
+	return tx.Commit(ctx)
 }
 
 func (s *Store) SetRepoIPs(ctx context.Context, id int64, prefixes []netip.Prefix) error {

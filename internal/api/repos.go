@@ -46,7 +46,7 @@ func (a *Repos) storeErr(w http.ResponseWriter, err error) {
 		errJSON(w, 404, err.Error())
 	case errors.Is(err, store.ErrBadSlug):
 		errJSON(w, 400, err.Error())
-	case errors.Is(err, store.ErrChain), errors.Is(err, store.ErrInChain), errors.Is(err, store.ErrExists):
+	case errors.Is(err, store.ErrChain), errors.Is(err, store.ErrInChain), errors.Is(err, store.ErrExists), errors.Is(err, store.ErrHasContent):
 		errJSON(w, 409, err.Error())
 	default:
 		errJSON(w, 500, "internal error")

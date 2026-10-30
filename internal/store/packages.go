@@ -122,3 +122,35 @@ func (s *Store) AddPackagesAudited(ctx context.Context, repoID int64, pkgs []Pac
 	}
 	return tx.Commit(ctx)
 }
+
+// AddPackageFirstStage is AddPackage for uploads: it fails with ErrLaterStage unless the
+// repo is a first stage, and holds a share lock on the repo row so a concurrent SetPrevious
+// cannot link the repo behind another one while the insert is in flight.
+func (s *Store) AddPackageFirstStage(ctx context.Context, p Package) (Package, error) {
+	tx, err := s.pool.Begin(ctx)
+	if err != nil {
+		return Package{}, err
+	}
+	defer tx.Rollback(ctx)
+	var prev *int64
+	if err := tx.QueryRow(ctx, `SELECT previous_id FROM repos WHERE id=$1 FOR SHARE`, p.RepoID).Scan(&prev); err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return Package{}, ErrNotFound
+		}
+		return Package{}, err
+	}
+	if prev != nil {
+		return Package{}, ErrLaterStage
+	}
+	out, err := scanPkg(tx.QueryRow(ctx, `
+		INSERT INTO packages(repo_id, filename, name, version, release, arch, sha256, size)
+		VALUES($1,$2,$3,$4,$5,$6,$7,$8) RETURNING `+pkgCols,
+		p.RepoID, p.Filename, p.Name, p.Version, p.Release, p.Arch, p.SHA256, p.Size))
+	if pgCode(err) == "23505" {
+		return Package{}, ErrExists
+	}
+	if err != nil {
+		return Package{}, err
+	}
+	return out, tx.Commit(ctx)
+}

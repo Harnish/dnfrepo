@@ -55,7 +55,7 @@ func ClientIP(r *http.Request, trusted []netip.Prefix) netip.Addr {
 
 // Guard wraps next with the access check for the repo named by slugOf(r).
 func Guard(st RepoStore, trusted []netip.Prefix) func(slugOf func(*http.Request) string, next http.Handler) http.Handler {
-	th := newThrottle()
+	th := NewThrottle()
 	return func(slugOf func(*http.Request) string, next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			repo, err := st.RepoBySlug(r.Context(), slugOf(r))
@@ -77,7 +77,7 @@ func Guard(st RepoStore, trusted []netip.Prefix) func(slugOf func(*http.Request)
 				}
 			case store.ModeUsers:
 				ip := ClientIP(r, trusted)
-				if th.blocked(ip) {
+				if th.Blocked(ip) {
 					http.Error(w, "too many failed attempts", http.StatusTooManyRequests)
 					return
 				}
@@ -93,7 +93,7 @@ func Guard(st RepoStore, trusted []netip.Prefix) func(slugOf func(*http.Request)
 					return
 				}
 				if !good {
-					th.fail(ip)
+					th.Fail(ip)
 					w.Header().Set("WWW-Authenticate", `Basic realm="dnfrepo"`)
 					http.Error(w, "invalid credentials", http.StatusUnauthorized)
 					return

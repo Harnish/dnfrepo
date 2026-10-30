@@ -57,11 +57,21 @@ func main() {
 		}
 	}
 
+	pl := &pipeline.Service{Store: st, Publisher: pub, MaxBytes: cfg.MaxUploadBytes}
+	if repos, err := st.ListRepos(ctx); err == nil {
+		for _, r := range repos {
+			if moved, err := pl.QuarantineOrphans(ctx, r.Slug); err != nil {
+				log.Printf("orphan sweep %s: %v", r.Slug, err)
+			} else if len(moved) > 0 {
+				log.Printf("orphan sweep %s: moved %v to %s/orphans/%s", r.Slug, moved, cfg.DataDir, r.Slug)
+			}
+		}
+	}
+
 	admin := adminauth.New(st, adminauth.NewSMTPMailer(cfg), cfg)
 	if err := admin.Bootstrap(ctx); err != nil {
 		log.Printf("bootstrap admin: %v", err)
 	}
-	pl := &pipeline.Service{Store: st, Publisher: pub, MaxBytes: cfg.MaxUploadBytes}
 	sch := &sources.Scheduler{Store: st, Pipeline: pl, GitHubToken: cfg.GitHubToken}
 	sch.Start(ctx)
 

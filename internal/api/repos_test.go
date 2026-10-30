@@ -1,6 +1,8 @@
 package api
 
 import (
+	"context"
+	"dnfrepo/internal/store"
 	"encoding/json"
 	"os"
 	"path/filepath"
@@ -62,5 +64,17 @@ func TestIPsEndpointValidates(t *testing.T) {
 	}
 	if w := e.Do("PUT", "/api/repos/dev/ips", `{"ips":["not-an-ip"]}`); w.Code != 400 {
 		t.Fatalf("bad: %d", w.Code)
+	}
+}
+
+func TestRelinkRepoWithPackagesIs409(t *testing.T) {
+	e := newEnv(t)
+	(&Repos{Store: e.St, DataDir: t.TempDir()}).Routes(e.Mux)
+	e.Do("POST", "/api/repos", `{"slug":"dev","name":"Dev","mode":"public"}`)
+	e.Do("POST", "/api/repos", `{"slug":"scratch","name":"Scratch","mode":"public"}`)
+	sc, _ := e.St.RepoBySlug(context.Background(), "scratch")
+	e.St.AddPackage(context.Background(), store.Package{RepoID: sc.ID, Filename: "evil-1.rpm", Name: "evil", Version: "1", Release: "1", Arch: "noarch", SHA256: "x", Size: 1})
+	if w := e.Do("PUT", "/api/repos/scratch/previous", `{"previous":"dev"}`); w.Code != 409 {
+		t.Fatalf("got %d %s", w.Code, w.Body)
 	}
 }

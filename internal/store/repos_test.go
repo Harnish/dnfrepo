@@ -113,3 +113,47 @@ func TestRepoBySlugNotFound(t *testing.T) {
 		t.Fatalf("got %v", err)
 	}
 }
+
+func TestSetPreviousRejectsRepoWithContent(t *testing.T) {
+	s := storetest.New(t)
+	ctx := context.Background()
+	head := mustRepo(t, s, "head", nil)
+	withPkg := mustRepo(t, s, "withpkg", nil)
+	if _, err := s.AddPackage(ctx, store.Package{RepoID: withPkg.ID, Filename: "a.rpm", Name: "a", Version: "1", Release: "1", Arch: "noarch", SHA256: "x", Size: 1}); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.SetPrevious(ctx, withPkg.ID, &head.ID); !errors.Is(err, store.ErrHasContent) {
+		t.Fatalf("repo with packages linked behind another: %v", err)
+	}
+	withSrc := mustRepo(t, s, "withsrc", nil)
+	if _, err := s.AddSource(ctx, withSrc.ID, "plex", ""); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.SetPrevious(ctx, withSrc.ID, &head.ID); !errors.Is(err, store.ErrHasContent) {
+		t.Fatalf("repo with sources linked behind another: %v", err)
+	}
+	empty := mustRepo(t, s, "empty", nil)
+	if err := s.SetPrevious(ctx, empty.ID, &head.ID); err != nil {
+		t.Fatalf("empty repo should link: %v", err)
+	}
+	// unlinking is always allowed
+	if err := s.SetPrevious(ctx, empty.ID, nil); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestAddPackageFirstStageRejectsLaterStage(t *testing.T) {
+	s := storetest.New(t)
+	ctx := context.Background()
+	a := mustRepo(t, s, "a", nil)
+	b := mustRepo(t, s, "b", &a.ID)
+	p := store.Package{Filename: "a.rpm", Name: "a", Version: "1", Release: "1", Arch: "noarch", SHA256: "x", Size: 1}
+	p.RepoID = a.ID
+	if _, err := s.AddPackageFirstStage(ctx, p); err != nil {
+		t.Fatal(err)
+	}
+	p.RepoID = b.ID
+	if _, err := s.AddPackageFirstStage(ctx, p); !errors.Is(err, store.ErrLaterStage) {
+		t.Fatalf("got %v", err)
+	}
+}

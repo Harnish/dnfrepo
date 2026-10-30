@@ -58,6 +58,7 @@ func (s *Service) Promote(ctx context.Context, fromSlug string, filenames []stri
 		return res, ErrNoNextStage
 	}
 	res.To = to.Slug
+	defer s.lock(to.Slug)()
 
 	var missing []string
 	var todo []store.Package
@@ -130,7 +131,7 @@ func (s *Service) Promote(ctx context.Context, fromSlug string, filenames []stri
 		res.Promoted = nil
 		return res, err
 	}
-	if err := s.Publisher.Rebuild(ctx, to.Slug); err != nil {
+	if err := s.rebuild(ctx, to.Slug); err != nil {
 		return res, fmt.Errorf("promoted but metadata rebuild failed: %w", err)
 	}
 	return res, nil

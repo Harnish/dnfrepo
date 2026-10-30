@@ -18,15 +18,29 @@ import (
 const testRPM = "../rpmmeta/testdata/hello-1.2.3-4.noarch.rpm"
 
 type fakePub struct {
-	dir     string
-	mu      sync.Mutex
-	rebuilt []string
+	dir       string
+	mu        sync.Mutex
+	rebuilt   []string
+	onRebuild func()        // runs at the start of Rebuild (e.g. cancel the caller's ctx)
+	ctxErr    error         // ctx.Err() as seen by the last Rebuild
+	block     chan struct{} // when set, Rebuild waits until it is closed
+	entered   chan struct{} // when set, Rebuild signals here on entry
 }
 
 func (f *fakePub) RepoDir(slug string) string { return filepath.Join(f.dir, "repos", slug) }
-func (f *fakePub) Rebuild(_ context.Context, slug string) error {
+func (f *fakePub) Rebuild(ctx context.Context, slug string) error {
+	if f.onRebuild != nil {
+		f.onRebuild()
+	}
+	if f.entered != nil {
+		f.entered <- struct{}{}
+	}
+	if f.block != nil {
+		<-f.block
+	}
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	f.ctxErr = ctx.Err()
 	f.rebuilt = append(f.rebuilt, slug)
 	return nil
 }
