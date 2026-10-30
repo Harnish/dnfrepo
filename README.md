@@ -1,0 +1,73 @@
+# dnfrepo
+
+A web service that manages signed dnf/yum repositories: upload rpms or pull them from GitHub releases and Plex, promote them through dev → test → prod, control who can pull from each repo, and hand out ready-made `.repo` files.
+
+## Features
+
+- Many repos, each served at `/r/<slug>/` with `createrepo_c` metadata signed by an instance GPG key (`repo_gpgcheck=1`).
+- **Pipelines:** link repos in a chain. Only the first repo takes uploads and sources; later repos get packages only by promoting from the previous one (one or many rpms per promotion, all-or-nothing).
+- **Access, one mode per repo:** `public`, `ips` (IP/CIDR allowlist), or `users` (HTTP Basic auth with per-user tokens).
+- **Sources** (first stage only): GitHub latest-release rpm (`owner/name`) and Plex Media Server, checked daily or on demand.
+- Browse page, `<slug>.repo` file and RSS feed per repo, all under that repo's access rule.
+- React admin UI and a JSON API under `/api`.
+
+## Run
+
+```
+docker build -t dnfrepo .
+docker run -d --name dnfrepo -p 8080:8080 -v dnfrepo-data:/data \
+  -e DATABASE_URL=postgres://user:pass@db/dnfrepo \
+  -e BASE_URL=https://repo.example.org \
+  -e BOOTSTRAP_ADMIN_EMAIL=you@example.org \
+  -e SMTP_HOST=smtp.example.org -e SMTP_USER=... -e SMTP_PASS=... -e SMTP_FROM=dnfrepo@example.org \
+  dnfrepo
+```
+
+On first start with no admins, a verification email goes to `BOOTSTRAP_ADMIN_EMAIL`; follow the link to set a password. Admins can then invite other admins from the UI.
+
+| Variable | Default | Meaning |
+|---|---|---|
+| `DATABASE_URL` | required | PostgreSQL DSN |
+| `BASE_URL` | required | Public URL, used in `.repo` files and emails |
+| `LISTEN_ADDR` | `:8080` | HTTP listen address |
+| `DATA_DIR` | `/data` | rpms, metadata, and the GPG key (`gpg/signing-key.asc`, mode 0600) — back this up |
+| `TRUSTED_PROXIES` | empty | Comma-separated IPs/CIDRs of reverse proxies whose `X-Forwarded-For` is trusted (needed for `ips` mode behind a proxy) |
+| `SMTP_HOST` `SMTP_PORT` `SMTP_USER` `SMTP_PASS` `SMTP_FROM` | port 587 | Outgoing mail for verification emails |
+| `BOOTSTRAP_ADMIN_EMAIL` | empty | First admin |
+| `GITHUB_TOKEN` | empty | Avoids GitHub API rate limits for sources |
+| `MAX_UPLOAD_BYTES` | 1 GiB | Per-rpm upload limit |
+
+TLS is not handled by the app: put it behind a reverse proxy (and set `TRUSTED_PROXIES`). Use HTTPS for `users`-mode repos, since Basic auth sends the token on every request.
+
+## Client setup
+
+```
+sudo dnf config-manager addrepo --from-repofile=https://repo.example.org/r/<slug>/<slug>.repo
+```
+
+`users`-mode `.repo` files contain `username=YOUR_USERNAME` / `password=YOUR_TOKEN` placeholders. The Repo users page can download one with a new user's credentials filled in.
+
+## Development
+
+```
+podman run -d --rm -p 5433:5432 -e POSTGRES_PASSWORD=pw postgres:17-alpine
+export DNFREPO_TEST_DSN=postgres://postgres:pw@localhost:5433/postgres
+go test ./...                       # DB tests skip when the variable is unset
+cd web && npm install && npm test && npm run build   # builds web/dist, embedded into the binary
+```
+
+Requires `createrepo_c` on `PATH` for the publish tests and for running the service outside the container.
+
+## API
+
+All `/api` routes except login/verify need the session cookie, and state-changing requests need the header `X-Requested-With: dnfrepo`.
+
+| | |
+|---|---|
+| `POST /api/auth/login` `verify`; `GET /api/auth/me`; `POST /api/auth/logout`; `POST /api/admins/invite` | admin accounts |
+| `GET/POST /api/repos`, `GET/PATCH/DELETE /api/repos/{slug}`, `PUT .../ips`, `PUT .../previous`, `GET/PUT .../users` | repos, pipeline links, access |
+| `GET/POST /api/repos/{slug}/packages` (multipart `file`), `DELETE .../packages/{filename}` | packages |
+| `POST /api/repos/{slug}/promote` `{"filenames":["foo-1.rpm","bar-2.rpm"]}` | promote to the next stage |
+| `GET/POST /api/repos/{slug}/sources`, `DELETE /api/sources/{id}`, `POST /api/sources/{id}/run` | sources |
+| `GET/POST /api/repo-users`, `DELETE /api/repo-users/{id}` | repo users and tokens |
+| `GET /api/repos/{slug}/audit` | activity log |
