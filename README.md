@@ -28,6 +28,11 @@ Admins sign in through OpenID Connect (built for Authentik). Only members of the
 
 Authentik setup: create an OAuth2/OpenID Provider (confidential client) with redirect URI `<BASE_URL>/api/auth/oidc/callback` and scopes `openid email profile`, bind it to an Application, and create the admin group (default name `dnfrepo-admins`). The ID token must carry a `groups` claim; Authentik's default `profile` scope mapping provides it. The provider is contacted on first login, not at boot, so repo serving keeps working while Authentik is down (admin login returns 503 until it's back).
 
+Admin sign-in limits to know about:
+
+- **Removal is not instant.** Group membership is read only at login. Removing or disabling someone in Authentik does not end a session they already have; it lasts up to 12 hours. To cut access sooner, delete their rows: `DELETE FROM admin_sessions WHERE email = '<their email>';`.
+- **Audit attribution uses the `email` claim.** Access is decided only by the `groups` claim, but the audit log records the email. An admin who can edit their own email in Authentik could appear in the log as another admin. Disable self-service email editing in Authentik (user settings stage) if attribution matters to you.
+
 | Variable | Default | Meaning |
 |---|---|---|
 | `DATABASE_URL` | required | PostgreSQL DSN |
