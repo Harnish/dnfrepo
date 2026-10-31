@@ -17,6 +17,8 @@ export default function RepoDetail() {
   const [err, setErr] = useState('')
   const [msg, setMsg] = useState('')
   const [src, setSrc] = useState({ kind: 'github', spec: '' })
+  const [keep, setKeep] = useState(0)
+  const [rules, setRules] = useState<{ name: string; keep: number }[]>([])
 
   const repo = repos.find((r) => r.slug === slug)
   const next = repos.find((r) => r.previous === slug)
@@ -34,6 +36,8 @@ export default function RepoDetail() {
     if (!r) return
     setMode(r.mode)
     setIps(r.ips.join('\n'))
+    setKeep(r.keep)
+    setRules(Object.entries(r.keep_overrides ?? {}).map(([name, k]) => ({ name, keep: k })))
     const [p, a] = await Promise.all([api.packages(slug), api.audit(slug)])
     setPkgs(p); setAudit(a); setSelected(new Set())
     if (!r.previous) setSources(await api.sources(slug))
@@ -123,6 +127,37 @@ export default function RepoDetail() {
           </fieldset>
         )}
         <button className="primary">Save access</button>
+      </form>
+
+      <h2>Retention</h2>
+      <form className="card" onSubmit={(ev) => {
+        ev.preventDefault()
+        run(async () => {
+          const overrides = Object.fromEntries(rules.filter((r) => r.name.trim()).map((r) => [r.name.trim(), r.keep]))
+          const res = await api.setKeep(slug, keep, overrides)
+          await load()
+          setMsg(res.purged.length ? `Saved. Purged ${res.purged.length} old version(s): ${res.purged.join(', ')}` : 'Saved. Nothing to purge.')
+        })
+      }}>
+        <p className="muted">Keep only the newest N versions of each package in this repo; older ones are deleted. 0 keeps everything. Applies now and after every upload or promotion here.</p>
+        <label>Default versions to keep
+          <input type="number" min={0} value={keep} onChange={(e) => setKeep(Math.max(0, Number(e.target.value) || 0))} />
+        </label>
+        {rules.map((r, i) => (
+          <div className="row" key={i}>
+            <label>Package name
+              <input value={r.name} onChange={(e) => setRules(rules.map((x, j) => j === i ? { ...x, name: e.target.value } : x))} placeholder="plexmediaserver" />
+            </label>
+            <label>Keep
+              <input type="number" min={0} value={r.keep} onChange={(e) => setRules(rules.map((x, j) => j === i ? { ...x, keep: Math.max(0, Number(e.target.value) || 0) } : x))} />
+            </label>
+            <button type="button" onClick={() => setRules(rules.filter((_, j) => j !== i))}>Remove</button>
+          </div>
+        ))}
+        <div className="row">
+          <button type="button" onClick={() => setRules([...rules, { name: '', keep: 1 }])}>Add per-package limit</button>
+          <button className="primary">Save &amp; apply</button>
+        </div>
       </form>
 
       {first && (

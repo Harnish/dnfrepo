@@ -157,3 +157,41 @@ func TestAddPackageFirstStageRejectsLaterStage(t *testing.T) {
 		t.Fatalf("got %v", err)
 	}
 }
+
+func TestRepoKeepRoundTrip(t *testing.T) {
+	s := storetest.New(t)
+	ctx := context.Background()
+	r := mustRepo(t, s, "dev", nil)
+	keep, ov, err := s.RepoKeep(ctx, r.ID)
+	if err != nil || keep != 0 || len(ov) != 0 {
+		t.Fatalf("defaults: %d %v %v", keep, ov, err)
+	}
+	if err := s.SetRepoKeep(ctx, r.ID, 3, map[string]int{"plex": 5, "lightcraft": 0}); err != nil {
+		t.Fatal(err)
+	}
+	keep, ov, _ = s.RepoKeep(ctx, r.ID)
+	if keep != 3 || len(ov) != 2 || ov["plex"] != 5 || ov["lightcraft"] != 0 {
+		t.Fatalf("got %d %v", keep, ov)
+	}
+	// replace, not merge
+	s.SetRepoKeep(ctx, r.ID, 1, map[string]int{"plex": 2})
+	keep, ov, _ = s.RepoKeep(ctx, r.ID)
+	if keep != 1 || len(ov) != 1 || ov["plex"] != 2 {
+		t.Fatalf("after replace: %d %v", keep, ov)
+	}
+	got, _ := s.RepoBySlug(ctx, "dev")
+	if got.Keep != 1 {
+		t.Fatalf("Repo.Keep=%d", got.Keep)
+	}
+}
+
+func TestSetRepoKeepRejectsNegative(t *testing.T) {
+	s := storetest.New(t)
+	r := mustRepo(t, s, "dev", nil)
+	if err := s.SetRepoKeep(context.Background(), r.ID, -1, nil); !errors.Is(err, store.ErrBadKeep) {
+		t.Fatalf("negative default: %v", err)
+	}
+	if err := s.SetRepoKeep(context.Background(), r.ID, 1, map[string]int{"a": -3}); !errors.Is(err, store.ErrBadKeep) {
+		t.Fatalf("negative override: %v", err)
+	}
+}

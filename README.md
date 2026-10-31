@@ -8,6 +8,7 @@ A web service that manages signed dnf/yum repositories: upload rpms or pull them
 - **Pipelines:** link repos in a chain. Only the first repo takes uploads and sources; later repos get packages only by promoting from the previous one (one or many rpms per promotion, all-or-nothing).
 - **Access, one mode per repo:** `public`, `ips` (IP/CIDR allowlist), or `users` (HTTP Basic auth with per-user tokens).
 - **Sources** (first stage only): GitHub latest-release rpm (`owner/name`) and Plex Media Server, checked daily or on demand.
+- **Retention:** per repo, keep only the newest N versions of each package (default limit plus per-package overrides; 0 = unlimited). Packages are grouped by name and arch and ordered with rpm's version comparison. Enforced after every upload or promotion into the repo and when the limits are saved; each stage has its own limits.
 - Browse page, `<slug>.repo` file and RSS feed per repo, all under that repo's access rule.
 - React admin UI and a JSON API under `/api`.
 
@@ -70,4 +71,5 @@ All `/api` routes except login/verify need the session cookie, and state-changin
 | `POST /api/repos/{slug}/promote` `{"filenames":["foo-1.rpm","bar-2.rpm"]}` | promote to the next stage |
 | `GET/POST /api/repos/{slug}/sources`, `DELETE /api/sources/{id}`, `POST /api/sources/{id}/run` | sources |
 | `GET/POST /api/repo-users`, `DELETE /api/repo-users/{id}` | repo users and tokens |
+| `PUT /api/repos/{slug}/keep` `{"keep":3,"overrides":{"plexmediaserver":10}}` | set retention limits and purge now (returns the purged filenames) |
 | `GET /api/repos/{slug}/audit` | activity log |

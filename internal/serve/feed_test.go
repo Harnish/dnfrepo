@@ -109,3 +109,14 @@ func TestFeedEscapesMarkup(t *testing.T) {
 		t.Fatal("unescaped markup in feed")
 	}
 }
+
+func TestFeedPurgedTitle(t *testing.T) {
+	f := newFixture(t)
+	ctx := context.Background()
+	r, _ := f.st.RepoBySlug(ctx, "pub")
+	f.st.AddAudit(ctx, r.ID, "admin@x", "purged", "old-1.rpm")
+	d, _ := fetchFeed(t, f)
+	if got := d.Channel.Items[0].Title; got != "old-1.rpm removed (purged: over keep limit)" {
+		t.Fatalf("title=%q", got)
+	}
+}

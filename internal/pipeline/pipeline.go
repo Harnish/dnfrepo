@@ -114,6 +114,9 @@ func (s *Service) Upload(ctx context.Context, slug, filename string, r io.Reader
 		return store.Package{}, err
 	}
 	s.Store.AddAudit(ctx, repo.ID, actor, "uploaded", filename)
+	if _, err := s.purgeLocked(ctx, repo, actor); err != nil {
+		return pkg, fmt.Errorf("package stored but purging old versions failed: %w", err)
+	}
 	if err := s.rebuild(ctx, slug); err != nil {
 		return pkg, fmt.Errorf("package stored but metadata rebuild failed: %w", err)
 	}

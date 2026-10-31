@@ -42,6 +42,7 @@ func pkgEnv(t *testing.T) (*env, string) {
 	pk.Routes(e.Mux)
 	pk.RoutesPromote(e.Mux)
 	pk.RoutesAudit(e.Mux)
+	pk.RoutesKeep(e.Mux)
 	return e, dir
 }
 
@@ -110,6 +111,33 @@ func TestAuditEndpoint(t *testing.T) {
 		t.Fatalf("audit: %d %s", w.Code, w.Body)
 	}
 	if w := e.Do("GET", "/api/repos/ghost/audit", ""); w.Code != 404 {
+		t.Fatalf("unknown repo: %d", w.Code)
+	}
+}
+
+func TestKeepEndpointValidatesAndPurges(t *testing.T) {
+	e, _ := pkgEnv(t)
+	e.Do("POST", "/api/repos", `{"slug":"dev","name":"Dev","mode":"public"}`)
+	for _, f := range []string{"hello-1.2.3-4.noarch.rpm", "hello-1.9.0-1.noarch.rpm", "hello-1.10.0-1.noarch.rpm"} {
+		b, _ := os.ReadFile("../rpmmeta/testdata/" + f)
+		if w := upload(e, "dev", f, b); w.Code != 201 {
+			t.Fatalf("upload %s: %d %s", f, w.Code, w.Body)
+		}
+	}
+	for _, bad := range []string{`{"keep":-1}`, `{"keep":1,"overrides":{"hello":-2}}`, `{"keep":1,"overrides":{"bad name!":1}}`} {
+		if w := e.Do("PUT", "/api/repos/dev/keep", bad); w.Code != 400 {
+			t.Errorf("%s: %d", bad, w.Code)
+		}
+	}
+	w := e.Do("PUT", "/api/repos/dev/keep", `{"keep":1,"overrides":{"other":5}}`)
+	if w.Code != 200 || !bytes.Contains(w.Body.Bytes(), []byte("hello-1.2.3-4.noarch.rpm")) || !bytes.Contains(w.Body.Bytes(), []byte("hello-1.9.0-1.noarch.rpm")) {
+		t.Fatalf("put keep: %d %s", w.Code, w.Body)
+	}
+	g := e.Do("GET", "/api/repos/dev", "")
+	if !bytes.Contains(g.Body.Bytes(), []byte(`"keep":1`)) || !bytes.Contains(g.Body.Bytes(), []byte(`"keep_overrides":{"other":5}`)) {
+		t.Fatalf("repo json: %s", g.Body)
+	}
+	if w := e.Do("PUT", "/api/repos/ghost/keep", `{"keep":1}`); w.Code != 404 {
 		t.Fatalf("unknown repo: %d", w.Code)
 	}
 }

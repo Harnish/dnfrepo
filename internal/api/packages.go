@@ -3,6 +3,7 @@ package api
 import (
 	"errors"
 	"net/http"
+	"regexp"
 
 	"dnfrepo/internal/pipeline"
 	"dnfrepo/internal/rpmmeta"
@@ -146,5 +147,48 @@ func (a *Packages) RoutesAudit(mux *http.ServeMux) {
 			out = append(out, map[string]any{"id": e.ID, "actor": e.Actor, "action": e.Action, "detail": e.Detail, "at": e.At.UTC().Format("2006-01-02T15:04:05Z")})
 		}
 		writeJSON(w, 200, out)
+	})
+}
+
+var pkgNameRe = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._+-]*$`)
+
+// RoutesKeep registers PUT /api/repos/{slug}/keep: set the repo's retention limits and apply them now.
+func (a *Packages) RoutesKeep(mux *http.ServeMux) {
+	mux.HandleFunc("PUT /api/repos/{slug}/keep", func(w http.ResponseWriter, r *http.Request) {
+		repo, err := a.Pipeline.Store.RepoBySlug(r.Context(), r.PathValue("slug"))
+		if err != nil {
+			pkgErr(w, err)
+			return
+		}
+		var in struct {
+			Keep      int
+			Overrides map[string]int
+		}
+		if !decode(w, r, &in) {
+			return
+		}
+		for name := range in.Overrides {
+			if !pkgNameRe.MatchString(name) {
+				errJSON(w, 400, "invalid package name: "+name)
+				return
+			}
+		}
+		if err := a.Pipeline.Store.SetRepoKeep(r.Context(), repo.ID, in.Keep, in.Overrides); err != nil {
+			if errors.Is(err, store.ErrBadKeep) {
+				errJSON(w, 400, err.Error())
+				return
+			}
+			pkgErr(w, err)
+			return
+		}
+		removed, err := a.Pipeline.ApplyKeep(r.Context(), repo.Slug, a.Actor(r))
+		if err != nil {
+			pkgErr(w, err)
+			return
+		}
+		if removed == nil {
+			removed = []string{}
+		}
+		writeJSON(w, 200, map[string]any{"purged": removed})
 	})
 }

@@ -35,4 +35,14 @@ describe('api', () => {
     mockFetch(409, { error: 'repo has no next stage to promote into' })
     await expect(api.promote('prod', ['a.rpm'])).rejects.toThrow('no next stage')
   })
+
+  it('setKeep puts the limits and returns purged files', async () => {
+    const f = mockFetch(200, { purged: ['hello-1.2.3-4.noarch.rpm'] })
+    const r = await api.setKeep('dev', 3, { plex: 5 })
+    const [url, init] = f.mock.calls[0]
+    expect(url).toBe('/api/repos/dev/keep')
+    expect(init.method).toBe('PUT')
+    expect(JSON.parse(init.body)).toEqual({ keep: 3, overrides: { plex: 5 } })
+    expect(r.purged).toEqual(['hello-1.2.3-4.noarch.rpm'])
+  })
 })

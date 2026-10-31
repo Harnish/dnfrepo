@@ -40,6 +40,8 @@ func eventTitle(e store.AuditEvent) string {
 		return fmt.Sprintf("%s added (promoted from %s)", file, from)
 	case "deleted":
 		return e.Detail + " removed"
+	case "purged":
+		return e.Detail + " removed (purged: over keep limit)"
 	default: // uploaded
 		if src, ok := strings.CutPrefix(e.Actor, "source:"); ok {
 			return fmt.Sprintf("%s added (fetched from %s)", e.Detail, src)

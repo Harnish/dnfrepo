@@ -5,7 +5,7 @@ export class ApiError extends Error {
 }
 
 export type Mode = 'public' | 'ips' | 'users'
-export interface Repo { slug: string; name: string; mode: Mode; previous: string | null; ips: string[] }
+export interface Repo { slug: string; name: string; mode: Mode; previous: string | null; ips: string[]; keep: number; keep_overrides: Record<string, number> }
 export interface Pkg { filename: string; name: string; version: string; release: string; arch: string; sha256: string; size: number; added_at: string }
 export interface Source { id: number; kind: 'github' | 'plex'; spec: string; last_run: string | null; last_status: string; last_error: string }
 export interface RepoUser { id: number; name: string; revoked: boolean }
@@ -51,6 +51,7 @@ export const api = {
   },
   deletePackage: (slug: string, filename: string) => req<unknown>('DELETE', `/api/repos/${e(slug)}/packages/${e(filename)}`),
   promote: (slug: string, filenames: string[]) => req<PromoteResult>('POST', `/api/repos/${e(slug)}/promote`, { filenames }),
+  setKeep: (slug: string, keep: number, overrides: Record<string, number>) => req<{ purged: string[] }>('PUT', `/api/repos/${e(slug)}/keep`, { keep, overrides }),
   audit: (slug: string) => req<AuditEvent[]>('GET', `/api/repos/${e(slug)}/audit`),
 
   sources: (slug: string) => req<Source[]>('GET', `/api/repos/${e(slug)}/sources`),

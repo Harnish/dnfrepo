@@ -25,6 +25,9 @@ type repoJSON struct {
 	Mode     string   `json:"mode"`
 	Previous *string  `json:"previous"`
 	IPs      []string `json:"ips"`
+
+	Keep          int            `json:"keep"`
+	KeepOverrides map[string]int `json:"keep_overrides"`
 }
 
 func (a *Repos) toJSON(r *http.Request, rp store.Repo, byID map[int64]string) (repoJSON, error) {
@@ -33,6 +36,11 @@ func (a *Repos) toJSON(r *http.Request, rp store.Repo, byID map[int64]string) (r
 		p := byID[*rp.PreviousID]
 		out.Previous = &p
 	}
+	keep, ov, kerr := a.Store.RepoKeep(r.Context(), rp.ID)
+	if kerr != nil {
+		return out, kerr
+	}
+	out.Keep, out.KeepOverrides = keep, ov
 	ips, err := a.Store.RepoIPs(r.Context(), rp.ID)
 	for _, p := range ips {
 		out.IPs = append(out.IPs, p.String())

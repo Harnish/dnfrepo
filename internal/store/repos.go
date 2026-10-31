@@ -27,6 +27,7 @@ var (
 	ErrChain    = errors.New("invalid pipeline link")
 	ErrInChain  = errors.New("repo is part of a pipeline; unlink it first")
 	ErrExists   = errors.New("already exists")
+	ErrBadKeep  = errors.New("keep limits must be >= 0")
 
 	ErrHasContent = errors.New("repo already has packages or sources; only an empty repo can be linked behind another")
 	ErrLaterStage = errors.New("repo is a later pipeline stage")
@@ -41,14 +42,15 @@ type Repo struct {
 	Slug, Name string
 	Mode       AccessMode
 	PreviousID *int64
+	Keep       int // default max versions kept per package name+arch; 0 = unlimited
 }
 
-const repoCols = `id, slug, name, mode, previous_id`
+const repoCols = `id, slug, name, mode, previous_id, keep`
 
 func scanRepo(row pgx.Row) (Repo, error) {
 	var r Repo
 	var mode string
-	err := row.Scan(&r.ID, &r.Slug, &r.Name, &mode, &r.PreviousID)
+	err := row.Scan(&r.ID, &r.Slug, &r.Name, &mode, &r.PreviousID, &r.Keep)
 	r.Mode = AccessMode(mode)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return r, ErrNotFound
@@ -241,4 +243,63 @@ func (s *Store) DeleteRepo(ctx context.Context, id int64) error {
 	}
 	_, err = s.pool.Exec(ctx, `DELETE FROM repos WHERE id=$1`, id)
 	return err
+}
+
+// SetRepoKeep replaces a repo's retention limits: keep is the default number of versions kept
+// per package name and arch (0 = unlimited); overrides maps a package name to its own limit.
+func (s *Store) SetRepoKeep(ctx context.Context, id int64, keep int, overrides map[string]int) error {
+	if keep < 0 {
+		return ErrBadKeep
+	}
+	for _, v := range overrides {
+		if v < 0 {
+			return ErrBadKeep
+		}
+	}
+	tx, err := s.pool.Begin(ctx)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback(ctx)
+	tag, err := tx.Exec(ctx, `UPDATE repos SET keep=$2 WHERE id=$1`, id, keep)
+	if err != nil {
+		return err
+	}
+	if tag.RowsAffected() == 0 {
+		return ErrNotFound
+	}
+	if _, err := tx.Exec(ctx, `DELETE FROM repo_keep_overrides WHERE repo_id=$1`, id); err != nil {
+		return err
+	}
+	for pkg, v := range overrides {
+		if _, err := tx.Exec(ctx, `INSERT INTO repo_keep_overrides(repo_id, package, keep) VALUES($1,$2,$3)`, id, pkg, v); err != nil {
+			return err
+		}
+	}
+	return tx.Commit(ctx)
+}
+
+func (s *Store) RepoKeep(ctx context.Context, id int64) (int, map[string]int, error) {
+	var keep int
+	if err := s.pool.QueryRow(ctx, `SELECT keep FROM repos WHERE id=$1`, id).Scan(&keep); err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return 0, nil, ErrNotFound
+		}
+		return 0, nil, err
+	}
+	rows, err := s.pool.Query(ctx, `SELECT package, keep FROM repo_keep_overrides WHERE repo_id=$1`, id)
+	if err != nil {
+		return 0, nil, err
+	}
+	defer rows.Close()
+	ov := map[string]int{}
+	for rows.Next() {
+		var p string
+		var k int
+		if err := rows.Scan(&p, &k); err != nil {
+			return 0, nil, err
+		}
+		ov[p] = k
+	}
+	return keep, ov, rows.Err()
 }

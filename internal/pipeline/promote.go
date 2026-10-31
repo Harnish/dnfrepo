@@ -131,6 +131,9 @@ func (s *Service) Promote(ctx context.Context, fromSlug string, filenames []stri
 		res.Promoted = nil
 		return res, err
 	}
+	if _, err := s.purgeLocked(ctx, *to, actor); err != nil {
+		return res, fmt.Errorf("promoted but purging old versions failed: %w", err)
+	}
 	if err := s.rebuild(ctx, to.Slug); err != nil {
 		return res, fmt.Errorf("promoted but metadata rebuild failed: %w", err)
 	}
