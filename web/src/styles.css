@@ -15,7 +15,8 @@ table { width:100%; border-collapse:collapse; } th,td { text-align:left; padding
 label { display:flex; flex-direction:column; gap:.2rem; margin:.5rem 0; font-size:.9rem; } label.inline { flex-direction:row; align-items:center; gap:.4rem; }
 input,select,textarea,button { font:inherit; padding:.4rem .6rem; border:1px solid var(--line); border-radius:6px; background:var(--card); color:var(--fg); }
 input[type=checkbox] { padding:0; } button { cursor:pointer; } button:disabled { opacity:.5; cursor:default; }
-button.primary { background:var(--accent); border-color:var(--accent); color:#fff; }
+button.primary, a.button.primary { background:var(--accent); border:1px solid var(--accent); color:#fff; }
+a.button { display:inline-block; padding:.4rem .6rem; border-radius:6px; text-decoration:none; }
 .row { display:flex; gap:.75rem; align-items:flex-end; flex-wrap:wrap; margin:.5rem 0; }
 .upload { flex-direction:row; align-items:center; gap:.5rem; }
 .muted { color:var(--muted); } .pad { padding:1rem; } .error { color:var(--bad); } .ok { color:var(--good); }

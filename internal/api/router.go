@@ -20,7 +20,7 @@ type Deps struct {
 	Static    fs.FS        // built React app (index.html at root)
 }
 
-// Router mounts: /healthz; public auth endpoints; admin API behind session + CSRF
+// Router mounts: /healthz; public OIDC login endpoints; admin API behind session + CSRF
 // header; repo serving (governed by repo access modes, not admin auth); the SPA.
 func Router(d Deps) http.Handler {
 	top := http.NewServeMux()
@@ -28,8 +28,7 @@ func Router(d Deps) http.Handler {
 
 	public := http.NewServeMux()
 	d.Admin.PublicRoutes(public)
-	top.Handle("/api/auth/login", adminauth.CSRF(public))
-	top.Handle("/api/auth/verify", adminauth.CSRF(public))
+	top.Handle("GET /api/auth/oidc/", public) // browser redirects: GET only, so no CSRF header
 
 	admin := http.NewServeMux()
 	d.Admin.AdminRoutes(admin)

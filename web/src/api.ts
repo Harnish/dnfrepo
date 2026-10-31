@@ -31,10 +31,7 @@ const e = encodeURIComponent
 
 export const api = {
   me: () => req<{ email: string }>('GET', '/api/auth/me'),
-  login: (email: string, password: string) => req<{ email: string }>('POST', '/api/auth/login', { email, password }),
   logout: () => req<unknown>('POST', '/api/auth/logout'),
-  verify: (token: string, password: string) => req<unknown>('POST', '/api/auth/verify', { token, password }),
-  invite: (email: string) => req<unknown>('POST', '/api/admins/invite', { email }),
 
   repos: () => req<Repo[]>('GET', '/api/repos'),
   createRepo: (r: { slug: string; name: string; mode: Mode; previous?: string }) => req<Repo>('POST', '/api/repos', r),

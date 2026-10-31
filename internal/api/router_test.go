@@ -52,7 +52,7 @@ func call(h http.Handler, method, path string, e *env, csrf bool) *httptest.Resp
 }
 
 var adminRoutes = []struct{ method, path string }{
-	{"GET", "/api/auth/me"}, {"POST", "/api/auth/logout"}, {"POST", "/api/admins/invite"},
+	{"GET", "/api/auth/me"}, {"POST", "/api/auth/logout"},
 	{"GET", "/api/repos"}, {"POST", "/api/repos"}, {"GET", "/api/repos/dev"}, {"PATCH", "/api/repos/dev"},
 	{"DELETE", "/api/repos/dev"}, {"PUT", "/api/repos/dev/ips"}, {"PUT", "/api/repos/dev/previous"},
 	{"GET", "/api/repos/dev/users"}, {"PUT", "/api/repos/dev/users"},
@@ -77,14 +77,20 @@ func TestAdminRoutesRequireSessionAndCSRFHeader(t *testing.T) {
 	}
 }
 
-func TestLoginAndVerifyArePublic(t *testing.T) {
+func TestOIDCEndpointsArePublic(t *testing.T) {
 	_, h, _ := routerEnv(t)
-	// reachable without a session (bad body -> 400/401, never the admin 401 "login required" wall for verify)
-	if w := call(h, "POST", "/api/auth/verify", nil, true); w.Code != 400 {
-		t.Errorf("verify: %d", w.Code)
+	if w := call(h, "GET", "/api/auth/oidc/login", nil, false); w.Code != 302 || !strings.HasPrefix(w.Header().Get("Location"), "https://idp.test/") {
+		t.Errorf("login: %d %q", w.Code, w.Header().Get("Location"))
 	}
-	if w := call(h, "POST", "/api/auth/login", nil, true); w.Code != 401 {
-		t.Errorf("login: %d", w.Code)
+	// no flow cookie: reaches the handler (400), not the admin "login required" wall (401)
+	if w := call(h, "GET", "/api/auth/oidc/callback?code=x&state=y", nil, false); w.Code != 400 {
+		t.Errorf("callback: %d", w.Code)
+	}
+	// the old password endpoints are gone
+	for _, p := range []string{"/api/auth/login", "/api/auth/verify", "/api/admins/invite"} {
+		if w := call(h, "POST", p, nil, true); w.Code != 401 {
+			t.Errorf("%s should now sit behind the admin wall, got %d", p, w.Code)
+		}
 	}
 }
 

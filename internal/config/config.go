@@ -11,10 +11,9 @@ import (
 type Config struct {
 	ListenAddr, DataDir, DatabaseURL, BaseURL string
 	TrustedProxies                            []netip.Prefix
-	SMTPHost                                  string
-	SMTPPort                                  int
-	SMTPUser, SMTPPass, SMTPFrom              string
-	BootstrapAdminEmail, GitHubToken          string
+	OIDCIssuer, OIDCClientID                  string
+	OIDCClientSecret, OIDCAdminGroup          string
+	GitHubToken                               string
 	MaxUploadBytes                            int64
 }
 
@@ -26,18 +25,16 @@ func Load(getenv func(string) string) (Config, error) {
 		return d
 	}
 	c := Config{
-		ListenAddr:          def("LISTEN_ADDR", ":8080"),
-		DataDir:             def("DATA_DIR", "/data"),
-		DatabaseURL:         getenv("DATABASE_URL"),
-		BaseURL:             strings.TrimRight(getenv("BASE_URL"), "/"),
-		SMTPHost:            getenv("SMTP_HOST"),
-		SMTPUser:            getenv("SMTP_USER"),
-		SMTPPass:            getenv("SMTP_PASS"),
-		SMTPFrom:            getenv("SMTP_FROM"),
-		BootstrapAdminEmail: getenv("BOOTSTRAP_ADMIN_EMAIL"),
-		GitHubToken:         getenv("GITHUB_TOKEN"),
-		SMTPPort:            587,
-		MaxUploadBytes:      1 << 30,
+		ListenAddr:       def("LISTEN_ADDR", ":8080"),
+		DataDir:          def("DATA_DIR", "/data"),
+		DatabaseURL:      getenv("DATABASE_URL"),
+		BaseURL:          strings.TrimRight(getenv("BASE_URL"), "/"),
+		OIDCIssuer:       getenv("OIDC_ISSUER"),
+		OIDCClientID:     getenv("OIDC_CLIENT_ID"),
+		OIDCClientSecret: getenv("OIDC_CLIENT_SECRET"),
+		OIDCAdminGroup:   def("OIDC_ADMIN_GROUP", "dnfrepo-admins"),
+		GitHubToken:      getenv("GITHUB_TOKEN"),
+		MaxUploadBytes:   1 << 30,
 	}
 	if c.DatabaseURL == "" {
 		return c, fmt.Errorf("DATABASE_URL required")
@@ -45,12 +42,10 @@ func Load(getenv func(string) string) (Config, error) {
 	if c.BaseURL == "" {
 		return c, fmt.Errorf("BASE_URL required")
 	}
-	if v := getenv("SMTP_PORT"); v != "" {
-		n, err := strconv.Atoi(v)
-		if err != nil {
-			return c, fmt.Errorf("SMTP_PORT: %w", err)
+	for k, v := range map[string]string{"OIDC_ISSUER": c.OIDCIssuer, "OIDC_CLIENT_ID": c.OIDCClientID, "OIDC_CLIENT_SECRET": c.OIDCClientSecret} {
+		if v == "" {
+			return c, fmt.Errorf("%s required", k)
 		}
-		c.SMTPPort = n
 	}
 	if v := getenv("MAX_UPLOAD_BYTES"); v != "" {
 		n, err := strconv.ParseInt(v, 10, 64)

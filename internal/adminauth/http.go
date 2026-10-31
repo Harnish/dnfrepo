@@ -1,22 +1,17 @@
 package adminauth
 
 import (
+	"crypto/sha256"
+	"crypto/subtle"
+	"encoding/base64"
 	"encoding/json"
-	"errors"
+	"log"
 	"net/http"
+	"slices"
 	"strings"
 
 	"dnfrepo/internal/access"
 )
-
-// decodeBody reads a small JSON body (64 KiB max).
-func decodeBody(w http.ResponseWriter, r *http.Request, v any) bool {
-	if json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<16)).Decode(v) != nil {
-		errJSON(w, http.StatusBadRequest, "bad json")
-		return false
-	}
-	return true
-}
 
 func writeJSON(w http.ResponseWriter, code int, v any) {
 	w.Header().Set("Content-Type", "application/json")
@@ -54,47 +49,55 @@ func CSRF(next http.Handler) http.Handler {
 	})
 }
 
-// PublicRoutes registers the endpoints usable without a session.
+// PublicRoutes registers the OIDC login endpoints, usable without a session.
 func (s *Service) PublicRoutes(mux *http.ServeMux) {
-	mux.HandleFunc("POST /api/auth/login", func(w http.ResponseWriter, r *http.Request) {
-		ip := access.ClientIP(r, s.trusted)
-		if !s.th.Attempt(ip) { // counted before the password check so parallel bursts can't outrun it
-			errJSON(w, 429, "too many attempts; try again later")
+	mux.HandleFunc("GET /api/auth/oidc/login", func(w http.ResponseWriter, r *http.Request) {
+		state, nonce, verifier := randToken(), randToken(), randToken()
+		sum := sha256.Sum256([]byte(verifier))
+		to, err := s.idp.AuthURL(state, nonce, base64.RawURLEncoding.EncodeToString(sum[:]))
+		if err != nil {
+			log.Printf("oidc discovery: %v", err)
+			errJSON(w, http.StatusServiceUnavailable, "identity provider unavailable; try again shortly")
 			return
 		}
-		var in struct{ Email, Password string }
-		if !decodeBody(w, r, &in) {
-			return
-		}
-		tok, err := s.Login(r.Context(), in.Email, in.Password)
-		if errors.Is(err, ErrBadCreds) {
-			errJSON(w, 401, err.Error())
-			return
-		} else if err != nil {
-			errJSON(w, 503, "try again")
-			return
-		}
-		s.th.Reset(ip)
-		http.SetCookie(w, &http.Cookie{Name: SessionCookie, Value: tok, Path: "/", HttpOnly: true,
-			SameSite: http.SameSiteLaxMode, Secure: strings.HasPrefix(s.baseURL, "https://"), MaxAge: int(sessionTTL.Seconds())})
-		writeJSON(w, 200, map[string]string{"email": strings.ToLower(in.Email)})
+		http.SetCookie(w, s.cookie(oidcCookie, state+"."+nonce+"."+verifier, int(flowTTL.Seconds())))
+		http.Redirect(w, r, to, http.StatusFound)
 	})
-	mux.HandleFunc("POST /api/auth/verify", func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("GET /api/auth/oidc/callback", func(w http.ResponseWriter, r *http.Request) {
 		ip := access.ClientIP(r, s.trusted)
-		if !s.th.Attempt(ip) {
-			errJSON(w, 429, "too many attempts; try again later")
+		if !s.th.Attempt(ip) { // counted before any checking so parallel bursts can't outrun it
+			errJSON(w, http.StatusTooManyRequests, "too many attempts; try again later")
 			return
 		}
-		var in struct{ Token, Password string }
-		if !decodeBody(w, r, &in) {
+		c, err := r.Cookie(oidcCookie)
+		http.SetCookie(w, s.cookie(oidcCookie, "", -1))
+		var flow []string
+		if err == nil {
+			flow = strings.Split(c.Value, ".")
+		}
+		if len(flow) != 3 || subtle.ConstantTimeCompare([]byte(flow[0]), []byte(r.URL.Query().Get("state"))) != 1 {
+			errJSON(w, http.StatusBadRequest, "invalid or expired login; start again")
 			return
 		}
-		if err := s.VerifyAndSetPassword(r.Context(), in.Token, in.Password); err != nil {
-			errJSON(w, 400, err.Error())
+		claims, err := s.idp.Exchange(r.Context(), r.URL.Query().Get("code"), flow[2], flow[1])
+		if err != nil {
+			log.Printf("oidc exchange: %v", err) // error text can echo provider detail; never sent to the client
+			errJSON(w, http.StatusUnauthorized, "login failed")
+			return
+		}
+		email := strings.ToLower(strings.TrimSpace(claims.Email))
+		if email == "" || !slices.Contains(claims.Groups, s.group) {
+			errJSON(w, http.StatusForbidden, "not a member of the admin group")
+			return
+		}
+		tok, err := s.newSession(r.Context(), email)
+		if err != nil {
+			errJSON(w, http.StatusServiceUnavailable, "try again")
 			return
 		}
 		s.th.Reset(ip)
-		writeJSON(w, 200, map[string]string{"status": "verified"})
+		http.SetCookie(w, s.cookie(SessionCookie, tok, int(sessionTTL.Seconds())))
+		http.Redirect(w, r, "/", http.StatusFound)
 	})
 }
 
@@ -104,23 +107,11 @@ func (s *Service) AdminRoutes(mux *http.ServeMux) {
 		if c, err := r.Cookie(SessionCookie); err == nil {
 			s.Logout(r.Context(), c.Value)
 		}
-		http.SetCookie(w, &http.Cookie{Name: SessionCookie, Path: "/", MaxAge: -1})
+		http.SetCookie(w, s.cookie(SessionCookie, "", -1))
 		writeJSON(w, 200, map[string]string{"status": "ok"})
 	})
 	mux.HandleFunc("GET /api/auth/me", func(w http.ResponseWriter, r *http.Request) {
 		email, _ := s.Authenticate(r)
 		writeJSON(w, 200, map[string]string{"email": email})
-	})
-	mux.HandleFunc("POST /api/admins/invite", func(w http.ResponseWriter, r *http.Request) {
-		var in struct{ Email string }
-		if !decodeBody(w, r, &in) {
-			return
-		}
-		actor, _ := s.Authenticate(r)
-		if err := s.Invite(r.Context(), actor, in.Email); err != nil {
-			errJSON(w, 400, err.Error())
-			return
-		}
-		writeJSON(w, 200, map[string]string{"status": "invited"})
 	})
 }

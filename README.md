@@ -19,22 +19,25 @@ docker build -t dnfrepo .
 docker run -d --name dnfrepo -p 8080:8080 -v dnfrepo-data:/data \
   -e DATABASE_URL=postgres://user:pass@db/dnfrepo \
   -e BASE_URL=https://repo.example.org \
-  -e BOOTSTRAP_ADMIN_EMAIL=you@example.org \
-  -e SMTP_HOST=smtp.example.org -e SMTP_USER=... -e SMTP_PASS=... -e SMTP_FROM=dnfrepo@example.org \
+  -e OIDC_ISSUER=https://auth.example.org/application/o/dnfrepo/ \
+  -e OIDC_CLIENT_ID=... -e OIDC_CLIENT_SECRET=... \
   dnfrepo
 ```
 
-On first start with no admins, a verification email goes to `BOOTSTRAP_ADMIN_EMAIL`; follow the link to set a password. Admins can then invite other admins from the UI.
+Admins sign in through OpenID Connect (built for Authentik). Only members of the `OIDC_ADMIN_GROUP` group can get in; the group is checked at login, so removing someone takes effect when their session expires (12 hours).
+
+Authentik setup: create an OAuth2/OpenID Provider (confidential client) with redirect URI `<BASE_URL>/api/auth/oidc/callback` and scopes `openid email profile`, bind it to an Application, and create the admin group (default name `dnfrepo-admins`). The ID token must carry a `groups` claim; Authentik's default `profile` scope mapping provides it. The provider is contacted on first login, not at boot, so repo serving keeps working while Authentik is down (admin login returns 503 until it's back).
 
 | Variable | Default | Meaning |
 |---|---|---|
 | `DATABASE_URL` | required | PostgreSQL DSN |
-| `BASE_URL` | required | Public URL, used in `.repo` files and emails |
+| `BASE_URL` | required | Public URL, used in `.repo` files and the OIDC redirect URI |
 | `LISTEN_ADDR` | `:8080` | HTTP listen address |
 | `DATA_DIR` | `/data` | rpms, metadata, and the GPG key (`gpg/signing-key.asc`, mode 0600) — back this up |
 | `TRUSTED_PROXIES` | empty | Comma-separated IPs/CIDRs of reverse proxies whose `X-Forwarded-For` is trusted (needed for `ips` mode behind a proxy) |
-| `SMTP_HOST` `SMTP_PORT` `SMTP_USER` `SMTP_PASS` `SMTP_FROM` | port 587 | Outgoing mail for verification emails |
-| `BOOTSTRAP_ADMIN_EMAIL` | empty | First admin |
+| `OIDC_ISSUER` | required | Issuer URL, e.g. `https://auth.example.org/application/o/<slug>/` |
+| `OIDC_CLIENT_ID` `OIDC_CLIENT_SECRET` | required | From the Authentik provider |
+| `OIDC_ADMIN_GROUP` | `dnfrepo-admins` | Group whose members are admins |
 | `GITHUB_TOKEN` | empty | Avoids GitHub API rate limits for sources |
 | `MAX_UPLOAD_BYTES` | 1 GiB | Per-rpm upload limit |
 
@@ -61,11 +64,11 @@ Requires `createrepo_c` on `PATH` for the publish tests and for running the serv
 
 ## API
 
-All `/api` routes except login/verify need the session cookie, and state-changing requests need the header `X-Requested-With: dnfrepo`.
+All `/api` routes except `GET /api/auth/oidc/login` and `/callback` need the session cookie, and state-changing requests need the header `X-Requested-With: dnfrepo`.
 
 | | |
 |---|---|
-| `POST /api/auth/login` `verify`; `GET /api/auth/me`; `POST /api/auth/logout`; `POST /api/admins/invite` | admin accounts |
+| `GET /api/auth/oidc/login` `callback`; `GET /api/auth/me`; `POST /api/auth/logout` | admin sign-in (OIDC) |
 | `GET/POST /api/repos`, `GET/PATCH/DELETE /api/repos/{slug}`, `PUT .../ips`, `PUT .../previous`, `GET/PUT .../users` | repos, pipeline links, access |
 | `GET/POST /api/repos/{slug}/packages` (multipart `file`), `DELETE .../packages/{filename}` | packages |
 | `POST /api/repos/{slug}/promote` `{"filenames":["foo-1.rpm","bar-2.rpm"]}` | promote to the next stage |

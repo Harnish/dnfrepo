@@ -12,7 +12,7 @@ Go web service managing signed dnf/yum repos, with a React admin UI. Features, e
 
 ## Layout (`internal/`)
 
-`access` client IP, ip/users guard, Basic-auth throttle | `adminauth` admin accounts, argon2id, email verify | `api` JSON API + router | `config` env | `pipeline` ONLY writer of package files, per-repo locking, upload/promote/delete/rebuild/keep | `publish` createrepo_c + atomic metadata swap | `rpmmeta` header parsing | `rpmver` rpm version compare | `serve` repo HTTP, browse, `.repo`, feed | `signer` GPG detached signature | `sources` GitHub/Plex fetch + scheduler | `store` pgx + embedded migrations (`store/migrations/NNN_*.sql`, add new numbered files, never edit applied ones).
+`access` client IP, ip/users guard, Basic-auth throttle | `adminauth` admin sign-in via OIDC (Authentik), `OIDC_ADMIN_GROUP` checked at login, DB sessions keyed by email | `api` JSON API + router | `config` env | `pipeline` ONLY writer of package files, per-repo locking, upload/promote/delete/rebuild/keep | `publish` createrepo_c + atomic metadata swap | `rpmmeta` header parsing | `rpmver` rpm version compare | `serve` repo HTTP, browse, `.repo`, feed | `signer` GPG detached signature | `sources` GitHub/Plex fetch + scheduler | `store` pgx + embedded migrations (`store/migrations/NNN_*.sql`, add new numbered files, never edit applied ones).
 
 ## Invariants (do not break)
 
@@ -21,7 +21,7 @@ Go web service managing signed dnf/yum repos, with a React admin UI. Features, e
 - Access mode per repo is exactly one of public / ips / users and covers rpms, repodata, browse, feed, `.repo`. `X-Forwarded-For` only from `TRUSTED_PROXIES`.
 - Tokens and the GPG private key never in logs, responses after creation, or readable in the DB.
 - Retention: limit applies per (name, arch), per stage; never purges below the limit; audit event `purged`.
-- Auth throttles count the attempt before checking; argon2 is bounded by a 4-slot semaphore.
+- Auth throttles count the attempt before checking (OIDC callback, per IP). The OIDC provider is discovered lazily (`LazyIDP`) so a provider outage never blocks startup or repo serving.
 
 ## Known ceilings / deferred
 

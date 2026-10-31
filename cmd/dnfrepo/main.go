@@ -68,10 +68,7 @@ func main() {
 		}
 	}
 
-	admin := adminauth.New(st, adminauth.NewSMTPMailer(cfg), cfg)
-	if err := admin.Bootstrap(ctx); err != nil {
-		log.Printf("bootstrap admin: %v", err)
-	}
+	admin := adminauth.New(st, cfg, adminauth.LazyIDP(cfg)) // provider contacted on first login, not at boot
 	sch := &sources.Scheduler{Store: st, Pipeline: pl, GitHubToken: cfg.GitHubToken}
 	sch.Start(ctx)
 

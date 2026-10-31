@@ -2,18 +2,16 @@ import { useEffect, useState } from 'react'
 import { Link, Navigate, Route, Routes, useLocation, useNavigate } from 'react-router-dom'
 import { api, setUnauthorizedHandler } from './api'
 import Login from './pages/Login'
-import Verify from './pages/Verify'
 import Repos from './pages/Repos'
 import RepoDetail from './pages/RepoDetail'
 import Users from './pages/Users'
-import Admins from './pages/Admins'
 
 export default function App() {
   const nav = useNavigate()
   const loc = useLocation()
   const [email, setEmail] = useState<string | null>(null)
   const [checked, setChecked] = useState(false)
-  const open = loc.pathname === '/login' || loc.pathname === '/verify'
+  const open = loc.pathname === '/login'
 
   useEffect(() => {
     setUnauthorizedHandler(() => { setEmail(null); if (!open) nav('/login') })
@@ -34,7 +32,6 @@ export default function App() {
           <nav>
             <Link to="/">Repos</Link>
             <Link to="/users">Repo users</Link>
-            <Link to="/admins">Admins</Link>
           </nav>
           <span className="spacer" />
           <span className="muted">{email}</span>
@@ -43,12 +40,10 @@ export default function App() {
       )}
       <main>
         <Routes>
-          <Route path="/login" element={<Login onLogin={(e) => { setEmail(e); nav('/') }} />} />
-          <Route path="/verify" element={<Verify />} />
+          <Route path="/login" element={<Login />} />
           <Route path="/" element={<Repos />} />
           <Route path="/repos/:slug" element={<RepoDetail />} />
           <Route path="/users" element={<Users />} />
-          <Route path="/admins" element={<Admins />} />
         </Routes>
       </main>
     </>
