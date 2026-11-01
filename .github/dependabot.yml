@@ -4,10 +4,6 @@ updates:
     directory: /web
     schedule:
       interval: weekly
-    ignore:
-      # @vitejs/plugin-react 4.x doesn't support vite 8; 6.x requires it
-      - dependency-name: vite
-        update-types: ["version-update:semver-major"]
   - package-ecosystem: gomod
     directory: /
     schedule:
