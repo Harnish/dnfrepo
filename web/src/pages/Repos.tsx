@@ -1,5 +1,5 @@
 import { FormEvent, useCallback, useEffect, useState } from 'react'
-import { Link } from 'react-router-dom'
+import { Link, useNavigate } from 'react-router-dom'
 import { api, Mode, Repo } from '../api'
 
 // chains: each head (no previous) followed by its successors
@@ -14,6 +14,8 @@ function chains(repos: Repo[]): Repo[][] {
 
 export default function Repos() {
   const [repos, setRepos] = useState<Repo[]>([])
+  const nav = useNavigate()
+  const [mirror, setMirror] = useState(false)
   const [err, setErr] = useState('')
   const [f, setF] = useState({ slug: '', name: '', mode: 'public' as Mode, previous: '' })
   const load = useCallback(() => api.repos().then(setRepos).catch((x) => setErr(x.message)), [])
@@ -26,8 +28,10 @@ export default function Repos() {
     ev.preventDefault()
     setErr('')
     try {
-      await api.createRepo({ slug: f.slug, name: f.name || f.slug, mode: f.mode, previous: f.previous || undefined })
+      await api.createRepo({ slug: f.slug, name: f.name || f.slug, mode: f.mode, previous: mirror ? undefined : f.previous || undefined })
+      const slug = f.slug
       setF({ slug: '', name: '', mode: 'public', previous: '' })
+      if (mirror) { setMirror(false); nav(`/repos/${slug}?mirror=1`); return }
       load()
     } catch (x) { setErr((x as Error).message) }
   }
@@ -58,8 +62,13 @@ export default function Repos() {
               <option value="public">public</option><option value="ips">ips</option><option value="users">users</option>
             </select>
           </label>
+          <label>Type
+            <select value={mirror ? 'mirror' : 'standard'} onChange={(e) => setMirror(e.target.value === 'mirror')}>
+              <option value="standard">Standard</option><option value="mirror">Mirror</option>
+            </select>
+          </label>
           <label>Promotes from
-            <select value={f.previous} onChange={(e) => setF({ ...f, previous: e.target.value })}>
+            <select value={f.previous} disabled={mirror} onChange={(e) => setF({ ...f, previous: e.target.value })}>
               <option value="">(none — first stage)</option>
               {tails.map((r) => <option key={r.slug} value={r.slug}>{r.name}</option>)}
             </select>

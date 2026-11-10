@@ -1,5 +1,5 @@
 export class ApiError extends Error {
-  constructor(public status: number, message: string) {
+  constructor(public status: number, message: string, public data: Record<string, unknown> = {}) {
     super(message)
   }
 }
@@ -13,6 +13,22 @@ export interface AuditEvent { id: number; actor: string; action: string; detail:
 export interface ApiToken { id: number; name: string; created_by: string; created_at: string }
 export interface PromoteResult { to: string; promoted: string[]; skipped: string[] }
 
+export interface MirrorSchedule { frequency: 'manual' | 'daily' | 'weekly' | 'monthly'; time_of_day: string; timezone: string; weekdays: number[]; day_of_month: number; paused: boolean }
+export interface Mirror {
+  upstream_url: string; username: string; has_credentials: boolean; gpg_key: string; require_signature: boolean
+  arches: string[]; include: string[]; exclude: string[]; keep_latest: number; schedule: MirrorSchedule
+  state: 'idle' | 'running'; last_run: string | null; last_status: string; last_error: string; next_run: string | null
+}
+export interface RepoSection { id: string; name: string; url_kind: string; variables: string[]; has_credentials: boolean }
+export interface Batch { id: number; started_at: string; finished_at: string | null; status: string; added: number; error: string }
+/** PUT body. Everything except credentials is replaced, so always send gpg_key, filters and schedule. */
+export interface MirrorInput {
+  upstream_url?: string; repo_file?: string; section?: string; vars?: Record<string, string>
+  username?: string; token?: string; clear_credentials?: boolean
+  gpg_key?: string; require_signature?: boolean; arches?: string[]; include?: string[]; exclude?: string[]; keep_latest?: number
+  schedule?: MirrorSchedule
+}
+
 let onUnauthorized: () => void = () => {}
 export function setUnauthorizedHandler(f: () => void) { onUnauthorized = f }
 
@@ -24,7 +40,7 @@ async function req<T>(method: string, path: string, body?: unknown): Promise<T> 
   const res = await fetch(path, { method, headers, body: payload, credentials: 'same-origin' })
   const data = await res.json().catch(() => ({}))
   if (res.status === 401) onUnauthorized()
-  if (!res.ok) throw new ApiError(res.status, (data as { error?: string }).error ?? `HTTP ${res.status}`)
+  if (!res.ok) throw new ApiError(res.status, (data as { error?: string }).error ?? `HTTP ${res.status}`, data as Record<string, unknown>)
   return data as T
 }
 
@@ -61,6 +77,14 @@ export const api = {
   addSource: (slug: string, kind: string, spec: string) => req<Source>('POST', `/api/repos/${e(slug)}/sources`, { kind, spec }),
   deleteSource: (id: number) => req<unknown>('DELETE', `/api/sources/${id}`),
   runSource: (id: number) => req<unknown>('POST', `/api/sources/${id}/run`),
+
+  parseRepo: (text: string) => req<{ sections: RepoSection[] }>('POST', '/api/mirror/parse-repo', { repo_file: text }),
+  mirror: (slug: string) => req<Mirror>('GET', `/api/repos/${e(slug)}/mirror`),
+  putMirror: (slug: string, body: MirrorInput) => req<Mirror>('PUT', `/api/repos/${e(slug)}/mirror`, body),
+  deleteMirror: (slug: string) => req<unknown>('DELETE', `/api/repos/${e(slug)}/mirror`),
+  syncNow: (slug: string) => req<{ status: string }>('POST', `/api/repos/${e(slug)}/mirror/sync`),
+  batches: (slug: string) => req<Batch[]>('GET', `/api/repos/${e(slug)}/batches`),
+  promoteBatch: (slug: string, batch: number) => req<PromoteResult>('POST', `/api/repos/${e(slug)}/promote`, { batch }),
 
   repoUsers: () => req<RepoUser[]>('GET', '/api/repo-users'),
   createRepoUser: (name: string) => req<{ id: number; name: string; token: string }>('POST', '/api/repo-users', { name }),

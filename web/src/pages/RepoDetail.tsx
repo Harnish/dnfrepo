@@ -1,10 +1,12 @@
 import { FormEvent, useCallback, useEffect, useState } from 'react'
-import { Link, useNavigate, useParams } from 'react-router-dom'
-import { api, AuditEvent, fmtSize, Mode, Pkg, Repo, RepoUser, Source } from '../api'
+import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom'
+import MirrorPanel from './MirrorPanel'
+import { api, ApiError, AuditEvent, fmtSize, Mode, Pkg, Repo, RepoUser, Source } from '../api'
 
 export default function RepoDetail() {
   const { slug = '' } = useParams()
   const nav = useNavigate()
+  const [params] = useSearchParams()
   const [repos, setRepos] = useState<Repo[]>([])
   const [pkgs, setPkgs] = useState<Pkg[]>([])
   const [sources, setSources] = useState<Source[]>([])
@@ -17,6 +19,7 @@ export default function RepoDetail() {
   const [err, setErr] = useState('')
   const [msg, setMsg] = useState('')
   const [src, setSrc] = useState({ kind: 'github', spec: '' })
+  const [isMirror, setIsMirror] = useState(false)
   const [keep, setKeep] = useState(0)
   const [rules, setRules] = useState<{ name: string; keep: number }[]>([])
 
@@ -40,12 +43,17 @@ export default function RepoDetail() {
     setRules(Object.entries(r.keep_overrides ?? {}).map(([name, k]) => ({ name, keep: k })))
     const [p, a] = await Promise.all([api.packages(slug), api.audit(slug)])
     setPkgs(p); setAudit(a); setSelected(new Set())
-    if (!r.previous) setSources(await api.sources(slug))
+    if (!r.previous) {
+      setSources(await api.sources(slug))
+      // 404 = not a mirror; a freshly created "mirror" repo (?mirror=1) shows the empty form
+      const m = await api.mirror(slug).then(() => true, (x) => { if (x instanceof ApiError && x.status === 404) return false; throw x })
+      setIsMirror((was) => was || m || params.get('mirror') === '1')
+    }
     if (r.mode === 'users') {
       setUsers(await api.repoUsers())
       setGranted((await api.repoGrants(slug)).user_ids)
     }
-  }, [slug])
+  }, [slug, params])
   useEffect(() => { load().catch((x) => setErr(x.message)) }, [load])
 
   if (!repo) return <p className="muted">{err || 'Loading…'}</p>
@@ -100,11 +108,12 @@ export default function RepoDetail() {
             Promote {selected.size || ''} selected → {next.name}
           </button>
         )}
-        {first && (
+        {first && !isMirror && (
           <label className="upload">Upload rpm
             <input type="file" accept=".rpm" onChange={(e) => { const f = e.target.files?.[0]; if (f) run(async () => { await api.upload(slug, f); await load() }, `Uploaded ${f.name}`); e.target.value = '' }} />
           </label>
         )}
+        {first && isMirror && <span className="muted">Packages arrive by sync.</span>}
         {!first && <span className="muted">Packages arrive here only by promotion.</span>}
       </div>
 
@@ -160,7 +169,7 @@ export default function RepoDetail() {
         </div>
       </form>
 
-      {first && (
+      {first && !isMirror && (
         <>
           <h2>Sources</h2>
           <table>
@@ -187,6 +196,11 @@ export default function RepoDetail() {
             <button>Add source</button>
           </form>
         </>
+      )}
+
+      {isMirror && <MirrorPanel slug={slug} next={next?.name} onChanged={load} />}
+      {first && !isMirror && pkgs.length === 0 && sources.length === 0 && (
+        <p><button onClick={() => setIsMirror(true)}>Make this a mirror</button></p>
       )}
 
       <h2>Pipeline</h2>
