@@ -104,3 +104,32 @@ func TestBatchFilenamesScopedToRepo(t *testing.T) {
 		t.Errorf("next: %v", got)
 	}
 }
+
+func TestListBatchesIncludesPromotedBatches(t *testing.T) {
+	s := storetest.New(t)
+	ctx := context.Background()
+	r := mustRepo(t, s, "m", nil)
+	next := mustRepo(t, s, "next", &r.ID)
+	b1, _ := s.CreateBatch(ctx, r.ID)
+	b2, _ := s.CreateBatch(ctx, r.ID)
+	b3, _ := s.CreateBatch(ctx, r.ID) // never promoted
+	for _, id := range []int64{b1, b2, b3} {
+		if err := s.FinishBatch(ctx, id, "synced", 5, ""); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := s.AddPackagesAudited(ctx, next.ID, []store.Package{bpkg(next.ID, "a-1-1.x86_64.rpm", &b1), bpkg(next.ID, "b-1-1.x86_64.rpm", &b1),
+		bpkg(next.ID, "c-1-1.x86_64.rpm", &b2), bpkg(next.ID, "d-1-1.x86_64.rpm", nil)}, "u", "promoted", []string{"d", "d", "d", "d"}); err != nil {
+		t.Fatal(err)
+	}
+	bs, err := s.ListBatches(ctx, next.ID)
+	if err != nil || len(bs) != 2 || bs[0].ID != b2 || bs[1].ID != b1 {
+		t.Fatalf("want b2,b1: %+v %v", bs, err)
+	}
+	if bs[0].AddedCount != 1 || bs[1].AddedCount != 2 || bs[1].RepoID != r.ID {
+		t.Errorf("counts: %+v", bs)
+	}
+	if own, _ := s.ListBatches(ctx, r.ID); len(own) != 3 || own[0].AddedCount != 5 {
+		t.Errorf("owner: %+v", own)
+	}
+}

@@ -603,6 +603,36 @@ func TestRunCommittedButRebuildFailed(t *testing.T) {
 	}
 }
 
+func TestRunRetriesFailedRebuildWhenNothingNew(t *testing.T) {
+	e := newSyncEnv(t, fakeOpts{}, nil)
+	e.pub.err = errors.New("createrepo exploded")
+	e.add("hello-1.2.3-4.noarch")
+	if _, err := e.run(context.Background()); err == nil {
+		t.Fatal("want error")
+	}
+	// Still failing: nothing new, but the retried rebuild fails, so the status stays error.
+	if _, err := e.run(context.Background()); err == nil {
+		t.Fatal("want error")
+	}
+	if m := e.mirror(); m.LastStatus != "error" || e.pub.rebuilds != 2 {
+		t.Fatalf("status=%q rebuilds=%d", m.LastStatus, e.pub.rebuilds)
+	}
+	e.pub.err = nil
+	res, err := e.run(context.Background())
+	if err != nil || res.Status != "up to date" {
+		t.Fatalf("res=%+v err=%v", res, err)
+	}
+	if e.pub.rebuilds != 3 {
+		t.Errorf("rebuilds=%d", e.pub.rebuilds)
+	}
+	if m := e.mirror(); m.LastStatus != "up to date" {
+		t.Errorf("status=%q", m.LastStatus)
+	}
+	if _, err := e.run(context.Background()); err != nil || e.pub.rebuilds != 3 {
+		t.Errorf("healthy up-to-date run rebuilt again: rebuilds=%d err=%v", e.pub.rebuilds, err)
+	}
+}
+
 type rtFunc func(*http.Request) (*http.Response, error)
 
 func (f rtFunc) RoundTrip(r *http.Request) (*http.Response, error) { return f(r) }

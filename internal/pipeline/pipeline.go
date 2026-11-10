@@ -69,6 +69,12 @@ func (s *Service) rebuild(ctx context.Context, slug string) error {
 	return s.Publisher.Rebuild(rctx, slug)
 }
 
+// Rebuild regenerates slug's metadata under the repo lock; used to retry a failed post-commit rebuild.
+func (s *Service) Rebuild(ctx context.Context, slug string) error {
+	defer s.lock(slug)()
+	return s.rebuild(ctx, slug)
+}
+
 func (s *Service) Upload(ctx context.Context, slug, filename string, r io.Reader, actor string) (store.Package, error) {
 	if !filenameRe.MatchString(filename) {
 		return store.Package{}, ErrBadFilename

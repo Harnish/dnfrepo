@@ -31,9 +31,17 @@ func (s *Store) FinishBatch(ctx context.Context, id int64, status string, added 
 	return err
 }
 
-// ListBatches returns the newest batches first, at most 100.
+// ListBatches returns the repo's own batches and those its packages were promoted from, newest
+// first, at most 100. For a promoted batch AddedCount is how many of its packages are in repoID.
 func (s *Store) ListBatches(ctx context.Context, repoID int64) ([]Batch, error) {
-	rows, err := s.pool.Query(ctx, `SELECT id, repo_id, started_at, finished_at, status, added_count, error FROM sync_batches WHERE repo_id=$1 ORDER BY id DESC LIMIT 100`, repoID)
+	rows, err := s.pool.Query(ctx, `
+		SELECT b.id, b.repo_id, b.started_at, b.finished_at, b.status,
+			CASE WHEN b.repo_id=$1 THEN b.added_count
+				ELSE (SELECT count(*) FROM packages p WHERE p.repo_id=$1 AND p.origin_batch_id=b.id)::int END,
+			b.error
+		FROM sync_batches b
+		WHERE b.repo_id=$1 OR b.id IN (SELECT origin_batch_id FROM packages WHERE repo_id=$1 AND origin_batch_id IS NOT NULL)
+		ORDER BY b.id DESC LIMIT 100`, repoID)
 	if err != nil {
 		return nil, err
 	}

@@ -81,7 +81,12 @@ func main() {
 		}
 	}
 	// staging sits under DATA_DIR (same filesystem as the repos, so ingest can hardlink) but outside repos/
-	syncer := &mirror.Syncer{Store: st, Pipeline: pl, Box: box, StagingDir: filepath.Join(cfg.DataDir, "mirror-staging"), MaxRPMBytes: cfg.MaxUploadBytes}
+	// No overall client timeout: a sync is bounded by Syncer.Timeout (6h) via ctx. A stalled body
+	// read is only bounded by that. ponytail: add a per-read idle deadline if stalls show up.
+	tr := http.DefaultTransport.(*http.Transport).Clone()
+	tr.ResponseHeaderTimeout, tr.TLSHandshakeTimeout = 60*time.Second, 15*time.Second
+	syncer := &mirror.Syncer{Store: st, Pipeline: pl, Box: box, Client: &http.Client{Transport: tr},
+		StagingDir: filepath.Join(cfg.DataDir, "mirror-staging"), MaxRPMBytes: cfg.MirrorMaxRPMBytes}
 	syncer.Start(ctx)
 
 	actor := func(r *http.Request) string { e, _ := admin.Authenticate(r); return e }

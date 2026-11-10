@@ -47,6 +47,7 @@ Admin sign-in limits to know about:
 | `OIDC_ADMIN_GROUP` | `dnfrepo-admins` | Group whose members are admins |
 | `GITHUB_TOKEN` | empty | Avoids GitHub API rate limits for sources |
 | `MAX_UPLOAD_BYTES` | 1 GiB | Per-rpm upload limit |
+| `MIRROR_MAX_RPM_BYTES` | 4 GiB | Per-rpm limit for mirror downloads |
 | `SECRET_KEY` | empty | Seals mirror upstream credentials (username/token) in the database. Needed only when a mirror uses credentials. If you remove or change it later, stored credentials can no longer be decrypted: clear them and enter them again |
 | `REBUILD_TIMEOUT` | `10m` | Cap for one metadata rebuild (Go duration, e.g. `30m`); raise it for very large mirrors |
 
@@ -60,8 +61,8 @@ A mirror is an empty first-stage repo that copies an upstream dnf repo. Give it 
 - **Schedule:** manual, daily, weekly or monthly, with a time and time zone. A schedule missed while the service was down runs once at startup. Sync now runs on demand.
 - **Signature:** optionally verify upstream metadata with a GPG key. The mirror re-signs its own metadata with the instance key, so clients use this server's `/gpg.key`.
 - **Credentials:** optional username and token for the upstream, stored sealed with `SECRET_KEY` and never returned by the API.
-- **Batches:** every sync is a numbered batch. A batch can be promoted to the next stage as a unit.
-- **First sync:** a sync publishes only when it is fully downloaded and verified, so a big repo shows nothing until the whole first sync finishes. Syncs are additive: upstream deletions are not mirrored, and a package you delete by hand comes back at the next sync.
+- **Batches:** every sync is a numbered batch. A batch can be promoted to the next stage as a unit, and again from each later stage it reaches.
+- **First sync:** a sync publishes only when it is fully downloaded and verified, so a big repo shows nothing until the whole first sync finishes. A sync stops after 6 hours, so a very large first sync may take more than one run; files already staged and verified are reused, not downloaded again. If a sync published but its metadata rebuild failed, the next sync retries the rebuild even when nothing new is upstream. Syncs are additive: upstream deletions are not mirrored, and a package you delete by hand comes back at the next sync.
 - **Disk:** the mirror's size and the staging directory (`<DATA_DIR>/mirror-staging`) are the operator's concern. Staging is not cleaned up automatically. Internal and private upstream URLs are allowed (admins are trusted).
 - **Editing:** saving replaces every field except the credentials. Incremental `createrepo_c --update` exists but is off (no measured speedup). Frozen snapshot URLs are not supported yet (see `docs/TODO.md`).
 

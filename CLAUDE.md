@@ -17,7 +17,7 @@ Go web service managing signed dnf/yum repos, with a React admin UI. Features, e
 ## Invariants (do not break)
 
 - A package enters a non-first stage ONLY via promotion from its previous stage. All writes to package files go through `pipeline`, under the per-repo mutex. Relinking a repo that has packages/sources is rejected (`ErrHasContent`).
-- Metadata swap is atomic (`repodata.<gen>` + symlink); rebuild runs detached (`context.WithoutCancel`, 10 min timeout), never on the request context.
+- Metadata swap is atomic (`repodata.<gen>` + symlink); rebuild runs detached (`context.WithoutCancel`, `REBUILD_TIMEOUT`, default 10 min), never on the request context.
 - Access mode per repo is exactly one of public / ips / users and covers rpms, repodata, browse, feed, `.repo`. `X-Forwarded-For` only from `TRUSTED_PROXIES`.
 - Tokens and the GPG private key never in logs, responses after creation, or readable in the DB.
 - Mirror syncs publish only through `pipeline.IngestBatch` and never write package files themselves; upstream credentials are sealed (`SECRET_KEY`) and never leave the API.
@@ -26,7 +26,7 @@ Go web service managing signed dnf/yum repos, with a React admin UI. Features, e
 
 ## Known ceilings / deferred
 
-Transient signature mismatch while metadata swaps; per-IP throttle can't stop botnet-scale guessing; rpm epoch not tracked in ordering; IPv4-mapped CIDR entries and `.repo` newline injection via repo name are deferred minors; `<DATA_DIR>/mirror-staging` is never garbage-collected; a crash between pipeline's file link and DB commit leaves an orphan file that makes later syncs fail with `ErrExists` until removed by hand.
+Transient signature mismatch while metadata swaps; per-IP throttle can't stop botnet-scale guessing; rpm epoch not tracked in ordering; IPv4-mapped CIDR entries and `.repo` newline injection via repo name are deferred minors; `<DATA_DIR>/mirror-staging` is never garbage-collected; a crash between pipeline's file link and DB commit leaves an orphan file; the next start moves it aside (`QuarantineOrphans`, run before `syncer.Start`) so syncs self-heal; mirror purge (like upload/promote purge) removes old rpm files before the metadata swap, so older versions can 404 during a long rebuild.
 
 ## Conventions
 

@@ -40,10 +40,11 @@ type pkgJSON struct {
 	SHA256   string `json:"sha256"`
 	Size     int64  `json:"size"`
 	AddedAt  string `json:"added_at"`
+	Batch    *int64 `json:"origin_batch_id"`
 }
 
 func toPkgJSON(p store.Package) pkgJSON {
-	return pkgJSON{p.Filename, p.Name, p.Version, p.Release, p.Arch, p.SHA256, p.Size, p.AddedAt.UTC().Format("2006-01-02T15:04:05Z")}
+	return pkgJSON{p.Filename, p.Name, p.Version, p.Release, p.Arch, p.SHA256, p.Size, p.AddedAt.UTC().Format("2006-01-02T15:04:05Z"), p.OriginBatchID}
 }
 
 func (a *Packages) Routes(mux *http.ServeMux) {

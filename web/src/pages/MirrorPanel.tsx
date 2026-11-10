@@ -1,6 +1,7 @@
 import { FormEvent, useCallback, useEffect, useState } from 'react'
 import { api, ApiError, Batch, Mirror, MirrorInput, MirrorSchedule, RepoSection } from '../api'
 import { dayName, describeSchedule } from '../schedule'
+import BatchTable from './BatchTable'
 
 const browserTZ = () => { try { return Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC' } catch { return 'UTC' } }
 const zones = (): string[] => { try { return (Intl as unknown as { supportedValuesOf?: (k: string) => string[] }).supportedValuesOf?.('timeZone') ?? [] } catch { return [] } }
@@ -242,19 +243,7 @@ export default function MirrorPanel({ slug, next, onChanged }: { slug: string; n
         <button className="primary">Save mirror</button>
       </form>
 
-      <h3>Batches</h3>
-      <table>
-        <thead><tr><th>ID</th><th>Started</th><th>Status</th><th>Added</th><th>Error</th><th /></tr></thead>
-        <tbody>
-          {batches.map((b) => (
-            <tr key={b.id}>
-              <td>{b.id}</td><td>{fmt(b.started_at)}</td><td>{b.status}</td><td>{b.added}</td><td className="error">{b.error}</td>
-              <td><button disabled={!next} title={next ? '' : 'This repo has no next stage'} onClick={() => promote(b)}>Promote batch → {next ?? 'next stage'}</button></td>
-            </tr>
-          ))}
-          {batches.length === 0 && <tr><td colSpan={6} className="muted">No syncs yet.</td></tr>}
-        </tbody>
-      </table>
+      <BatchTable batches={batches} next={next} onPromote={promote} />
     </>
   )
 }

@@ -32,7 +32,7 @@ curl -fsS -H "Authorization: Bearer $TOKEN" -F file=@foo-1.0-1.x86_64.rpm "$BASE
 
 `201`:
 ```json
-{"filename":"foo-1.0-1.x86_64.rpm","name":"foo","version":"1.0","release":"1","arch":"x86_64","sha256":"…","size":12345,"added_at":"2026-11-10T20:00:00Z"}
+{"filename":"foo-1.0-1.x86_64.rpm","name":"foo","version":"1.0","release":"1","arch":"x86_64","sha256":"…","size":12345,"added_at":"2026-11-10T20:00:00Z","origin_batch_id":null}
 ```
 
 | Status | Meaning |
@@ -110,7 +110,7 @@ jq -n --arg tok "$UPSTREAM_TOKEN" '{upstream_url:"https://pkgs.example.org/el9/x
 
 ### Read / remove: `GET`, `DELETE /api/repos/{slug}/mirror`
 
-`GET` returns the config plus `state` (`idle`/`running`), `last_run`, `last_status`, `last_error`, `next_run`, `has_credentials`; `username` is shown, the token never. `DELETE` turns the repo back into a normal first stage, keeping its packages (`409` while a sync runs). Both `404` if the repo is not a mirror.
+`GET` returns the config plus `state` (`idle`/`running`), `last_run`, `last_status`, `last_error`, `next_run`, `has_credentials`; `username` is shown, the token never. `DELETE` turns the repo back into a normal first stage, keeping its packages (`409` while a sync runs; deleting the repo itself is also `409` while a sync runs). Both `404` if the repo is not a mirror.
 
 ### Sync now: `POST /api/repos/{slug}/mirror/sync`
 
@@ -122,7 +122,7 @@ curl -fsS -X POST -H "Authorization: Bearer $TOKEN" "$BASE/api/repos/el9/mirror/
 
 ### Batches: `GET /api/repos/{slug}/batches`
 
-`200 [{"id":12,"started_at":"…","finished_at":"…","status":"synced","added":40,"error":""}]`, newest first (at most 100).
+`200 [{"id":12,"started_at":"…","finished_at":"…","status":"synced","added":40,"error":""}]`, newest first (at most 100). Lists the repo's own sync batches and, in later stages, the batches its packages were promoted from; for those, `added` is how many of the batch's packages are in this repo. `origin_batch_id` on a package names its batch.
 
 ## Tokens (browser session only)
 

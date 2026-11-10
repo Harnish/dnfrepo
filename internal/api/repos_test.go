@@ -78,3 +78,24 @@ func TestRelinkRepoWithPackagesIs409(t *testing.T) {
 		t.Fatalf("got %d %s", w.Code, w.Body)
 	}
 }
+
+func TestDeleteRepoWhileMirrorSyncsIs409(t *testing.T) {
+	e := newEnv(t)
+	dir := t.TempDir()
+	(&Repos{Store: e.St, DataDir: dir}).Routes(e.Mux)
+	e.Do("POST", "/api/repos", `{"slug":"m","name":"M","mode":"public"}`)
+	r, _ := e.St.RepoBySlug(context.Background(), "m")
+	if err := e.St.SetMirror(context.Background(), store.Mirror{RepoID: r.ID, UpstreamURL: "https://u/"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := e.St.ClaimMirror(context.Background(), r.ID); err != nil {
+		t.Fatal(err)
+	}
+	os.MkdirAll(filepath.Join(dir, "repos", "m"), 0o755)
+	if w := e.Do("DELETE", "/api/repos/m", ""); w.Code != 409 {
+		t.Fatalf("got %d %s", w.Code, w.Body)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "repos", "m")); err != nil {
+		t.Fatalf("repo dir removed: %v", err)
+	}
+}

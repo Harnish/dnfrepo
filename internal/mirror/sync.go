@@ -157,6 +157,12 @@ func (s *Syncer) run(ctx context.Context, repoID int64, actor string, token *str
 		return Result{}, err
 	}
 	if len(want) == 0 {
+		// The last run may have committed a batch whose rebuild failed or was interrupted: retry it.
+		if m.LastStatus != "synced" && m.LastStatus != "up to date" {
+			if err := s.Pipeline.Rebuild(ctx, repo.Slug); err != nil {
+				return Result{}, fmt.Errorf("metadata rebuild failed: %w", err)
+			}
+		}
 		return Result{Status: "up to date"}, nil
 	}
 

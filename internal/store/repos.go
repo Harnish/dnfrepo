@@ -235,7 +235,9 @@ func (s *Store) RepoIPs(ctx context.Context, id int64) ([]netip.Prefix, error) {
 	return out, rows.Err()
 }
 
-// DeleteRepo removes a repo that is not linked into any pipeline.
+// DeleteRepo removes a repo that is not linked into any pipeline; ErrBusy while its mirror
+// syncs. The mirror row is locked FOR UPDATE, so a concurrent ClaimMirror waits and then
+// finds no mirror.
 func (s *Store) DeleteRepo(ctx context.Context, id int64) error {
 	r, err := s.RepoByID(ctx, id)
 	if err != nil {
@@ -248,8 +250,23 @@ func (s *Store) DeleteRepo(ctx context.Context, id int64) error {
 	if r.PreviousID != nil || next != nil {
 		return ErrInChain
 	}
-	_, err = s.pool.Exec(ctx, `DELETE FROM repos WHERE id=$1`, id)
-	return err
+	tx, err := s.pool.Begin(ctx)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback(ctx)
+	var state string
+	err = tx.QueryRow(ctx, `SELECT state FROM mirrors WHERE repo_id=$1 FOR UPDATE`, id).Scan(&state)
+	if err != nil && !errors.Is(err, pgx.ErrNoRows) {
+		return err
+	}
+	if state == "running" {
+		return ErrBusy
+	}
+	if _, err := tx.Exec(ctx, `DELETE FROM repos WHERE id=$1`, id); err != nil {
+		return err
+	}
+	return tx.Commit(ctx)
 }
 
 // SetRepoKeep replaces a repo's retention limits: keep is the default number of versions kept

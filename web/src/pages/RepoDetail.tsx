@@ -2,7 +2,8 @@ import { FormEvent, useCallback, useEffect, useState } from 'react'
 import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom'
 import { nextMirrorFor } from '../mirrorState'
 import MirrorPanel from './MirrorPanel'
-import { api, ApiError, AuditEvent, fmtSize, Mode, Pkg, Repo, RepoUser, Source } from '../api'
+import BatchTable from './BatchTable'
+import { api, ApiError, AuditEvent, Batch, fmtSize, Mode, Pkg, Repo, RepoUser, Source } from '../api'
 
 export default function RepoDetail() {
   const { slug = '' } = useParams()
@@ -10,6 +11,7 @@ export default function RepoDetail() {
   const [params] = useSearchParams()
   const [repos, setRepos] = useState<Repo[]>([])
   const [pkgs, setPkgs] = useState<Pkg[]>([])
+  const [batches, setBatches] = useState<Batch[]>([])
   const [sources, setSources] = useState<Source[]>([])
   const [audit, setAudit] = useState<AuditEvent[]>([])
   const [users, setUsers] = useState<RepoUser[]>([])
@@ -43,8 +45,8 @@ export default function RepoDetail() {
     setIps(r.ips.join('\n'))
     setKeep(r.keep)
     setRules(Object.entries(r.keep_overrides ?? {}).map(([name, k]) => ({ name, keep: k })))
-    const [p, a] = await Promise.all([api.packages(slug), api.audit(slug)])
-    setPkgs(p); setAudit(a); setSelected(new Set())
+    const [p, a, b] = await Promise.all([api.packages(slug), api.audit(slug), api.batches(slug)])
+    setPkgs(p); setAudit(a); setBatches(b); setSelected(new Set())
     if (r.previous) setMirrorFor(null)
     if (!r.previous) {
       setSources(await api.sources(slug))
@@ -202,6 +204,14 @@ export default function RepoDetail() {
       )}
 
       {isMirror && <MirrorPanel slug={slug} next={next?.name} onChanged={load} />}
+      {/* batches promoted into a later stage (or left on a former mirror) stay promotable */}
+      {!isMirror && batches.length > 0 && (
+        <BatchTable batches={batches} next={next?.name} onPromote={(b) => next && confirm(`Promote every package from batch ${b.id} to ${next.name}?`) && run(async () => {
+          const r = await api.promoteBatch(slug, b.id)
+          await load()
+          setMsg(`Promoted ${r.promoted.length} to ${r.to}` + (r.skipped.length ? `, ${r.skipped.length} already there` : ''))
+        })} />
+      )}
       {first && !isMirror && pkgs.length === 0 && sources.length === 0 && (
         <p><button onClick={() => setMirrorFor(slug)}>Make this a mirror</button></p>
       )}

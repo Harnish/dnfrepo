@@ -397,6 +397,17 @@ func TestPromoteBatchAndExclusiveBodyRule(t *testing.T) {
 	if names, _ := e.St.BatchFilenames(ctx, mkRepoID(t, e, "test"), bid); len(names) != 1 {
 		t.Fatalf("origin batch not carried: %v", names)
 	}
+	// ...listed there, with its package showing the origin, and promotable onward
+	if w := e.Do("GET", "/api/repos/test/batches", ""); w.Code != 200 || !strings.Contains(w.Body.String(), fmt.Sprintf(`"id":%d`, bid)) || !strings.Contains(w.Body.String(), `"added":1`) {
+		t.Fatalf("next-stage batches: %d %s", w.Code, w.Body)
+	}
+	if w := e.Do("GET", "/api/repos/test/packages", ""); !strings.Contains(w.Body.String(), fmt.Sprintf(`"origin_batch_id":%d`, bid)) {
+		t.Fatalf("packages: %s", w.Body)
+	}
+	mkRepo(t, e, "prod", "test")
+	if w := e.Do("POST", "/api/repos/test/promote", fmt.Sprintf(`{"batch":%d}`, bid)); w.Code != 200 || !strings.Contains(w.Body.String(), `"to":"prod"`) {
+		t.Fatalf("promote from test: %d %s", w.Code, w.Body)
+	}
 }
 
 func TestPutMirrorFixups(t *testing.T) {

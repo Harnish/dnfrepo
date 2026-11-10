@@ -6,7 +6,7 @@ export class ApiError extends Error {
 
 export type Mode = 'public' | 'ips' | 'users'
 export interface Repo { slug: string; name: string; mode: Mode; previous: string | null; ips: string[]; keep: number; keep_overrides: Record<string, number> }
-export interface Pkg { filename: string; name: string; version: string; release: string; arch: string; sha256: string; size: number; added_at: string }
+export interface Pkg { filename: string; name: string; version: string; release: string; arch: string; sha256: string; size: number; added_at: string; origin_batch_id: number | null }
 export interface Source { id: number; kind: 'github' | 'plex'; spec: string; last_run: string | null; last_status: string; last_error: string }
 export interface RepoUser { id: number; name: string; revoked: boolean }
 export interface AuditEvent { id: number; actor: string; action: string; detail: string; at: string }

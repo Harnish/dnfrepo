@@ -17,6 +17,7 @@ type Config struct {
 	GitHubToken                               string
 	AdminEmail, AdminPassword                 string // optional local admin login (homelab); replaces OIDC when set
 	MaxUploadBytes                            int64
+	MirrorMaxRPMBytes                         int64         // per mirrored rpm
 	SecretKey                                 string        // optional; seals upstream credentials
 	RebuildTimeout                            time.Duration // metadata rebuild timeout
 }
@@ -29,20 +30,21 @@ func Load(getenv func(string) string) (Config, error) {
 		return d
 	}
 	c := Config{
-		ListenAddr:       def("LISTEN_ADDR", ":8080"),
-		DataDir:          def("DATA_DIR", "/data"),
-		DatabaseURL:      getenv("DATABASE_URL"),
-		BaseURL:          strings.TrimRight(getenv("BASE_URL"), "/"),
-		OIDCIssuer:       getenv("OIDC_ISSUER"),
-		OIDCClientID:     getenv("OIDC_CLIENT_ID"),
-		OIDCClientSecret: getenv("OIDC_CLIENT_SECRET"),
-		OIDCAdminGroup:   def("OIDC_ADMIN_GROUP", "dnfrepo-admins"),
-		GitHubToken:      getenv("GITHUB_TOKEN"),
-		AdminEmail:       strings.ToLower(strings.TrimSpace(getenv("ADMIN_EMAIL"))),
-		AdminPassword:    getenv("ADMIN_PASSWORD"),
-		MaxUploadBytes:   1 << 30,
-		SecretKey:        getenv("SECRET_KEY"),
-		RebuildTimeout:   10 * time.Minute,
+		ListenAddr:        def("LISTEN_ADDR", ":8080"),
+		DataDir:           def("DATA_DIR", "/data"),
+		DatabaseURL:       getenv("DATABASE_URL"),
+		BaseURL:           strings.TrimRight(getenv("BASE_URL"), "/"),
+		OIDCIssuer:        getenv("OIDC_ISSUER"),
+		OIDCClientID:      getenv("OIDC_CLIENT_ID"),
+		OIDCClientSecret:  getenv("OIDC_CLIENT_SECRET"),
+		OIDCAdminGroup:    def("OIDC_ADMIN_GROUP", "dnfrepo-admins"),
+		GitHubToken:       getenv("GITHUB_TOKEN"),
+		AdminEmail:        strings.ToLower(strings.TrimSpace(getenv("ADMIN_EMAIL"))),
+		AdminPassword:     getenv("ADMIN_PASSWORD"),
+		MaxUploadBytes:    1 << 30,
+		MirrorMaxRPMBytes: 4 << 30,
+		SecretKey:         getenv("SECRET_KEY"),
+		RebuildTimeout:    10 * time.Minute,
 	}
 	if c.DatabaseURL == "" {
 		return c, fmt.Errorf("DATABASE_URL required")
@@ -64,6 +66,13 @@ func Load(getenv func(string) string) (Config, error) {
 			return c, fmt.Errorf("MAX_UPLOAD_BYTES: %w", err)
 		}
 		c.MaxUploadBytes = n
+	}
+	if v := getenv("MIRROR_MAX_RPM_BYTES"); v != "" {
+		n, err := strconv.ParseInt(v, 10, 64)
+		if err != nil {
+			return c, fmt.Errorf("MIRROR_MAX_RPM_BYTES: %w", err)
+		}
+		c.MirrorMaxRPMBytes = n
 	}
 	if v := getenv("REBUILD_TIMEOUT"); v != "" {
 		d, err := time.ParseDuration(v)

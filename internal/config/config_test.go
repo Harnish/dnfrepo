@@ -100,3 +100,19 @@ func TestLoadSecretKeyAndRebuildTimeout(t *testing.T) {
 		t.Fatal("invalid duration accepted")
 	}
 }
+
+func TestLoadMirrorMaxRPMBytes(t *testing.T) {
+	m := map[string]string{"DATABASE_URL": "p", "BASE_URL": "http://x", "OIDC_ISSUER": "i", "OIDC_CLIENT_ID": "c", "OIDC_CLIENT_SECRET": "s"}
+	c, err := Load(env(m))
+	if err != nil || c.MirrorMaxRPMBytes != 4<<30 {
+		t.Fatalf("default: %d %v", c.MirrorMaxRPMBytes, err)
+	}
+	m["MIRROR_MAX_RPM_BYTES"] = "123"
+	if c, err = Load(env(m)); err != nil || c.MirrorMaxRPMBytes != 123 {
+		t.Fatalf("override: %d %v", c.MirrorMaxRPMBytes, err)
+	}
+	m["MIRROR_MAX_RPM_BYTES"] = "x"
+	if _, err := Load(env(m)); err == nil {
+		t.Fatal("invalid size accepted")
+	}
+}
