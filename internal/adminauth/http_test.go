@@ -294,3 +294,66 @@ func TestLocalLoginAbsentUnlessConfigured(t *testing.T) {
 		t.Fatalf("methods: %s", w.Body.String())
 	}
 }
+
+func bearerReq(method, path, tok string) *http.Request {
+	r := httptest.NewRequest(method, path, strings.NewReader(`{"name":"x"}`))
+	r.Header.Set("Authorization", "Bearer "+tok)
+	return r
+}
+
+func TestAPITokenLifecycle(t *testing.T) {
+	s, h := localHandler(t)
+	ctx := context.Background()
+	id, tok, err := s.CreateToken(ctx, "ci", "joe@home.lan")
+	if err != nil || !strings.HasPrefix(tok, "dnfr_") {
+		t.Fatalf("create: %q %v", tok, err)
+	}
+	if email, ok := s.Authenticate(bearerReq("GET", "/x", tok)); !ok || email != "token:ci" {
+		t.Fatalf("bearer auth: %q %v", email, ok)
+	}
+	// a bad bearer must not fall back to a valid session cookie
+	c := sessionCookie(localLogin(h, "1.1.1.1:1", `{"email":"joe@home.lan","password":"s3cret"}`))
+	r := bearerReq("GET", "/x", "dnfr_wrong")
+	r.AddCookie(c)
+	if _, ok := s.Authenticate(r); ok {
+		t.Fatal("bad bearer fell back to cookie")
+	}
+	list, _ := s.ListTokens(ctx)
+	if len(list) != 1 || list[0].Name != "ci" || list[0].CreatedBy != "joe@home.lan" {
+		t.Fatalf("list: %+v", list)
+	}
+	if err := s.DeleteToken(ctx, id); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := s.Authenticate(bearerReq("GET", "/x", tok)); ok {
+		t.Fatal("deleted token still accepted")
+	}
+	if _, _, err := s.CreateToken(ctx, " ", "a"); err == nil {
+		t.Fatal("blank name accepted")
+	}
+}
+
+func TestTokenEndpointsNeedSessionNotBearer(t *testing.T) {
+	s, h := localHandler(t)
+	_, tok, _ := s.CreateToken(context.Background(), "ci", "a")
+	c := sessionCookie(localLogin(h, "1.1.1.1:1", `{"email":"joe@home.lan","password":"s3cret"}`))
+	r := httptest.NewRequest("POST", "/api/auth/tokens", strings.NewReader(`{"name":"new"}`))
+	r.AddCookie(c)
+	w := httptest.NewRecorder()
+	h.ServeHTTP(w, r)
+	if w.Code != 201 || !strings.Contains(w.Body.String(), `"token":"dnfr_`) {
+		t.Fatalf("create via session: %d %s", w.Code, w.Body)
+	}
+	w = httptest.NewRecorder()
+	h.ServeHTTP(w, bearerReq("POST", "/api/auth/tokens", tok))
+	if w.Code != http.StatusForbidden {
+		t.Fatalf("token minted a token: %d", w.Code)
+	}
+	r = httptest.NewRequest("GET", "/api/auth/tokens", nil)
+	r.AddCookie(c)
+	w = httptest.NewRecorder()
+	h.ServeHTTP(w, r)
+	if w.Code != 200 || strings.Contains(w.Body.String(), "token_hash") || strings.Contains(w.Body.String(), tok) {
+		t.Fatalf("list leaks secrets: %d %s", w.Code, w.Body)
+	}
+}

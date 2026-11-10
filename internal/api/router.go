@@ -29,6 +29,8 @@ func Router(d Deps) http.Handler {
 	public := http.NewServeMux()
 	d.Admin.PublicRoutes(public)
 	top.Handle("GET /api/auth/oidc/", public) // browser redirects: GET only, so no CSRF header
+	top.Handle("GET /api/auth/methods", public)
+	top.Handle("POST /api/auth/local", public) // throttled; 404 unless ADMIN_EMAIL/ADMIN_PASSWORD are set
 
 	admin := http.NewServeMux()
 	d.Admin.AdminRoutes(admin)

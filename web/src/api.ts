@@ -10,6 +10,7 @@ export interface Pkg { filename: string; name: string; version: string; release:
 export interface Source { id: number; kind: 'github' | 'plex'; spec: string; last_run: string | null; last_status: string; last_error: string }
 export interface RepoUser { id: number; name: string; revoked: boolean }
 export interface AuditEvent { id: number; actor: string; action: string; detail: string; at: string }
+export interface ApiToken { id: number; name: string; created_by: string; created_at: string }
 export interface PromoteResult { to: string; promoted: string[]; skipped: string[] }
 
 let onUnauthorized: () => void = () => {}
@@ -33,6 +34,9 @@ export const api = {
   me: () => req<{ email: string }>('GET', '/api/auth/me'),
   methods: () => req<{ local: boolean }>('GET', '/api/auth/methods'),
   localLogin: (email: string, password: string) => req<unknown>('POST', '/api/auth/local', { email, password }),
+  tokens: () => req<ApiToken[]>('GET', '/api/auth/tokens'),
+  createToken: (name: string) => req<{ id: number; name: string; token: string }>('POST', '/api/auth/tokens', { name }),
+  deleteToken: (id: number) => req<unknown>('DELETE', `/api/auth/tokens/${id}`),
   logout: () => req<unknown>('POST', '/api/auth/logout'),
 
   repos: () => req<Repo[]>('GET', '/api/repos'),

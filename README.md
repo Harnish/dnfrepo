@@ -70,11 +70,12 @@ Requires `createrepo_c` on `PATH` for the publish tests and for running the serv
 
 ## API
 
-All `/api` routes except `GET /api/auth/oidc/login` and `/callback` need the session cookie, and state-changing requests need the header `X-Requested-With: dnfrepo`.
+Scripts authenticate with an admin API token (`Authorization: Bearer dnfr_...`, created on the API tokens page). Full reference for upload, delete and promote, with examples and error codes: [docs/api.md](docs/api.md). The admin UI uses the session cookie instead, and its state-changing requests need the header `X-Requested-With: dnfrepo`. Public routes: `GET /api/auth/methods`, `GET /api/auth/oidc/login` and `/callback`, `POST /api/auth/local`.
 
 | | |
 |---|---|
-| `GET /api/auth/oidc/login` `callback`; `GET /api/auth/me`; `POST /api/auth/logout` | admin sign-in (OIDC) |
+| `GET /api/auth/oidc/login` `callback`; `POST /api/auth/local`; `GET /api/auth/me`; `POST /api/auth/logout` | admin sign-in (OIDC, or local when `ADMIN_EMAIL`/`ADMIN_PASSWORD` set) |
+| `GET/POST /api/auth/tokens`, `DELETE /api/auth/tokens/{id}` | admin API tokens (browser session only) |
 | `GET/POST /api/repos`, `GET/PATCH/DELETE /api/repos/{slug}`, `PUT .../ips`, `PUT .../previous`, `GET/PUT .../users` | repos, pipeline links, access |
 | `GET/POST /api/repos/{slug}/packages` (multipart `file`), `DELETE .../packages/{filename}` | packages |
 | `POST /api/repos/{slug}/promote` `{"filenames":["foo-1.rpm","bar-2.rpm"]}` | promote to the next stage |

@@ -26,3 +26,4 @@ pre { background:var(--bg); padding:.6rem; border-radius:6px; overflow-x:auto; }
 fieldset { border:1px solid var(--line); border-radius:6px; margin:.5rem 0; }
 .audit { list-style:none; padding:0; } .audit li { padding:.2rem 0; border-bottom:1px solid var(--line); }
 @media (max-width:600px) { main { padding:.75rem; } }
+.toc ul { margin:.25rem 0 .5rem; padding-left:1.2rem; } section { scroll-margin-top:1rem; } dd { margin:0 0 .75rem; color:var(--muted); } ol li { margin:.35rem 0; }

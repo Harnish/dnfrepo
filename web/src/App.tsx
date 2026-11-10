@@ -5,6 +5,8 @@ import Login from './pages/Login'
 import Repos from './pages/Repos'
 import RepoDetail from './pages/RepoDetail'
 import Users from './pages/Users'
+import Tokens from './pages/Tokens'
+import Help from './pages/Help'
 
 export default function App() {
   const nav = useNavigate()
@@ -32,6 +34,8 @@ export default function App() {
           <nav>
             <Link to="/">Repos</Link>
             <Link to="/users">Repo users</Link>
+            <Link to="/tokens">API tokens</Link>
+            <Link to="/help">Help</Link>
           </nav>
           <span className="spacer" />
           <span className="muted">{email}</span>
@@ -44,6 +48,8 @@ export default function App() {
           <Route path="/" element={<Repos />} />
           <Route path="/repos/:slug" element={<RepoDetail />} />
           <Route path="/users" element={<Users />} />
+          <Route path="/tokens" element={<Tokens />} />
+          <Route path="/help" element={<Help />} />
         </Routes>
       </main>
     </>

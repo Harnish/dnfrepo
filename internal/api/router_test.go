@@ -1,6 +1,7 @@
 package api
 
 import (
+	"context"
 	"net/http"
 	"net/http/httptest"
 	"net/netip"
@@ -10,9 +11,12 @@ import (
 	"testing"
 	"testing/fstest"
 
+	"dnfrepo/internal/adminauth"
+	"dnfrepo/internal/config"
 	"dnfrepo/internal/pipeline"
 	"dnfrepo/internal/serve"
 	"dnfrepo/internal/sources"
+	"dnfrepo/internal/store/storetest"
 )
 
 func routerEnv(t *testing.T) (*env, http.Handler, string) {
@@ -52,7 +56,7 @@ func call(h http.Handler, method, path string, e *env, csrf bool) *httptest.Resp
 }
 
 var adminRoutes = []struct{ method, path string }{
-	{"GET", "/api/auth/me"}, {"POST", "/api/auth/logout"},
+	{"GET", "/api/auth/me"}, {"POST", "/api/auth/logout"}, {"GET", "/api/auth/tokens"}, {"POST", "/api/auth/tokens"}, {"DELETE", "/api/auth/tokens/1"},
 	{"GET", "/api/repos"}, {"POST", "/api/repos"}, {"GET", "/api/repos/dev"}, {"PATCH", "/api/repos/dev"},
 	{"DELETE", "/api/repos/dev"}, {"PUT", "/api/repos/dev/ips"}, {"PUT", "/api/repos/dev/previous"},
 	{"GET", "/api/repos/dev/users"}, {"PUT", "/api/repos/dev/users"},
@@ -133,5 +137,47 @@ func TestSPAFallback(t *testing.T) {
 	}
 	if w := call(h, "GET", "/api/nope", e, false); w.Code != 404 || strings.Contains(w.Body.String(), "SPA") {
 		t.Fatalf("unknown api path authed: %d", w.Code)
+	}
+}
+
+func TestLocalLoginEndpointsArePublic(t *testing.T) {
+	svc := adminauth.New(storetest.New(t), config.Config{BaseURL: "http://x", AdminEmail: "a@b.c", AdminPassword: "pw"}, fakeIDP)
+	h := Router(Deps{Admin: svc, Repos: &Repos{}, RepoUsers: &RepoUsers{}, Packages: &Packages{}, Sources: &Sources{}, Serve: http.NotFoundHandler(),
+		Static: fstest.MapFS{"index.html": {Data: []byte("SPA")}}})
+	r := httptest.NewRequest("GET", "/api/auth/methods", nil)
+	if w := httptest.NewRecorder(); func() bool {
+		h.ServeHTTP(w, r)
+		return w.Code != 200 || !strings.Contains(w.Body.String(), `"local":true`)
+	}() {
+		t.Errorf("methods must be public and report local:true")
+	}
+	r = httptest.NewRequest("POST", "/api/auth/local", strings.NewReader(`{"email":"a@b.c","password":"pw"}`))
+	w := httptest.NewRecorder()
+	h.ServeHTTP(w, r)
+	if w.Code != 200 {
+		t.Errorf("local login via router: %d %s", w.Code, w.Body)
+	}
+}
+
+func TestBearerTokenSkipsCSRFHeaderAndReachesAdminAPI(t *testing.T) {
+	e, h, _ := routerEnv(t)
+	_, tok, err := e.Admin.CreateToken(context.Background(), "ci", "a@b.c")
+	if err != nil {
+		t.Fatal(err)
+	}
+	r := httptest.NewRequest("POST", "/api/repos", strings.NewReader(`{"slug":"dev","name":"Dev","mode":"public"}`))
+	r.Header.Set("Authorization", "Bearer "+tok) // no cookie, no X-Requested-With
+	w := httptest.NewRecorder()
+	h.ServeHTTP(w, r)
+	if w.Code != 201 {
+		t.Fatalf("bearer create repo: %d %s", w.Code, w.Body)
+	}
+	r = httptest.NewRequest("POST", "/api/repos", strings.NewReader(`{}`))
+	r.Header.Set("Authorization", "Bearer dnfr_bad")
+	r.AddCookie(e.Cookie) // valid cookie must not rescue a bad bearer
+	w = httptest.NewRecorder()
+	h.ServeHTTP(w, r)
+	if w.Code != 401 {
+		t.Fatalf("bad bearer: %d", w.Code)
 	}
 }

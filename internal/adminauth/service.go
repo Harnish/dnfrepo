@@ -83,8 +83,14 @@ func (s *Service) Logout(ctx context.Context, token string) {
 	s.st.Pool().Exec(ctx, `DELETE FROM admin_sessions WHERE token_hash=$1`, hashToken(token))
 }
 
-// Authenticate returns the signed-in admin's email from the session cookie.
+// Authenticate returns the admin's identity: "token:<name>" for a valid Bearer API token, else the
+// session cookie's email. A Bearer header that is present but invalid never falls back to the cookie.
 func (s *Service) Authenticate(r *http.Request) (string, bool) {
+	if t := bearer(r); t != "" {
+		var name string
+		err := s.st.Pool().QueryRow(r.Context(), `SELECT name FROM admin_tokens WHERE token_hash=$1`, hashToken(t)).Scan(&name)
+		return "token:" + name, err == nil
+	}
 	c, err := r.Cookie(SessionCookie)
 	if err != nil || c.Value == "" {
 		return "", false

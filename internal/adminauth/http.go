@@ -8,6 +8,7 @@ import (
 	"log"
 	"net/http"
 	"slices"
+	"strconv"
 	"strings"
 
 	"dnfrepo/internal/access"
@@ -40,7 +41,8 @@ func CSRF(next http.Handler) http.Handler {
 		switch r.Method {
 		case http.MethodGet, http.MethodHead, http.MethodOptions:
 		default:
-			if r.Header.Get("X-Requested-With") != "dnfrepo" {
+			// Bearer requests carry no ambient credentials (browsers never attach them cross-site), so no CSRF header.
+			if bearer(r) == "" && r.Header.Get("X-Requested-With") != "dnfrepo" {
 				errJSON(w, http.StatusForbidden, "missing X-Requested-With header")
 				return
 			}
@@ -116,6 +118,50 @@ func (s *Service) AdminRoutes(mux *http.ServeMux) {
 		http.SetCookie(w, s.cookie(SessionCookie, "", -1))
 		writeJSON(w, 200, map[string]string{"status": "ok"})
 	})
+	// Token management needs a browser session: a leaked token must not be able to mint more tokens.
+	sessionOnly := func(h http.HandlerFunc) http.HandlerFunc {
+		return func(w http.ResponseWriter, r *http.Request) {
+			if bearer(r) != "" {
+				errJSON(w, http.StatusForbidden, "token management requires a signed-in session")
+				return
+			}
+			h(w, r)
+		}
+	}
+	mux.HandleFunc("GET /api/auth/tokens", sessionOnly(func(w http.ResponseWriter, r *http.Request) {
+		ts, err := s.ListTokens(r.Context())
+		if err != nil {
+			errJSON(w, 500, "internal error")
+			return
+		}
+		writeJSON(w, 200, ts)
+	}))
+	mux.HandleFunc("POST /api/auth/tokens", sessionOnly(func(w http.ResponseWriter, r *http.Request) {
+		var in struct{ Name string }
+		if json.NewDecoder(http.MaxBytesReader(w, r.Body, 4096)).Decode(&in) != nil {
+			errJSON(w, 400, "invalid JSON body")
+			return
+		}
+		by, _ := s.Authenticate(r)
+		id, tok, err := s.CreateToken(r.Context(), in.Name, by)
+		if err != nil {
+			errJSON(w, 400, "name must be 1-64 characters and unique")
+			return
+		}
+		writeJSON(w, 201, map[string]any{"id": id, "name": strings.TrimSpace(in.Name), "token": tok})
+	}))
+	mux.HandleFunc("DELETE /api/auth/tokens/{id}", sessionOnly(func(w http.ResponseWriter, r *http.Request) {
+		id, err := strconv.ParseInt(r.PathValue("id"), 10, 64)
+		if err != nil {
+			errJSON(w, 400, "invalid id")
+			return
+		}
+		if s.DeleteToken(r.Context(), id) != nil {
+			errJSON(w, 500, "internal error")
+			return
+		}
+		writeJSON(w, 200, map[string]string{"status": "deleted"})
+	}))
 	mux.HandleFunc("GET /api/auth/me", func(w http.ResponseWriter, r *http.Request) {
 		email, _ := s.Authenticate(r)
 		writeJSON(w, 200, map[string]string{"email": email})

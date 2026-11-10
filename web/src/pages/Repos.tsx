@@ -46,7 +46,7 @@ export default function Repos() {
           ))}
         </div>
       ))}
-      {repos.length === 0 && <p className="muted">No repos yet.</p>}
+      {repos.length === 0 && <p className="muted">No repos yet. New here? <Link to="/help#first-repo">Start with the walkthrough</Link>.</p>}
 
       <form className="card" onSubmit={create}>
         <h2>New repo</h2>
