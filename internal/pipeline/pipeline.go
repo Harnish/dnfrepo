@@ -28,6 +28,9 @@ var (
 
 var filenameRe = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._+~-]*\.rpm$`)
 
+// ValidFilename reports whether name is an acceptable rpm file name (no path).
+func ValidFilename(name string) bool { return filenameRe.MatchString(name) }
+
 // Publisher is satisfied by *publish.Publisher.
 type Publisher interface {
 	RepoDir(slug string) string

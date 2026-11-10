@@ -160,9 +160,18 @@ func isHTTP(u string) bool {
 }
 
 func fetch(ctx context.Context, c *http.Client, u string) ([]byte, error) {
+	return fetchAuth(ctx, c, u, "", "", maxBody)
+}
+
+// get issues a GET (Basic auth when user or token is set) and returns the body
+// of a 200 response. Errors carry only the redacted URL.
+func get(ctx context.Context, c *http.Client, u, user, token string) (io.ReadCloser, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u, nil)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("GET %s: invalid url", redact(u))
+	}
+	if user != "" || token != "" {
+		req.SetBasicAuth(user, token)
 	}
 	resp, err := c.Do(req)
 	if err != nil {
@@ -172,16 +181,25 @@ func fetch(ctx context.Context, c *http.Client, u string) ([]byte, error) {
 		}
 		return nil, fmt.Errorf("GET %s: %w", redact(u), err)
 	}
-	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
+		resp.Body.Close()
 		return nil, fmt.Errorf("GET %s: status %d", redact(u), resp.StatusCode)
 	}
-	b, err := io.ReadAll(io.LimitReader(resp.Body, maxBody+1))
+	return resp.Body, nil
+}
+
+func fetchAuth(ctx context.Context, c *http.Client, u, user, token string, max int64) ([]byte, error) {
+	body, err := get(ctx, c, u, user, token)
 	if err != nil {
 		return nil, err
 	}
-	if len(b) > maxBody {
-		return nil, fmt.Errorf("GET %s: response over %d bytes", redact(u), maxBody)
+	defer body.Close()
+	b, err := io.ReadAll(io.LimitReader(body, max+1))
+	if err != nil {
+		return nil, fmt.Errorf("GET %s: %w", redact(u), err)
+	}
+	if int64(len(b)) > max {
+		return nil, fmt.Errorf("GET %s: response over %d bytes", redact(u), max)
 	}
 	return b, nil
 }
