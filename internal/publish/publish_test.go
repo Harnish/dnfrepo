@@ -7,11 +7,14 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
+	"sort"
 	"strings"
 	"sync"
 	"testing"
 
 	"github.com/ProtonMail/go-crypto/openpgp"
+	"github.com/klauspost/compress/zstd"
 
 	"dnfrepo/internal/signer"
 )
@@ -174,5 +177,76 @@ func TestRebuildSerializedPerRepo(t *testing.T) {
 	}
 	if err := verifyDir(t, s, filepath.Join(p.RepoDir("dev"), "repodata")); err != nil {
 		t.Fatal(err)
+	}
+}
+
+// primaryHrefs returns the rpm locations listed in the current primary metadata.
+func primaryHrefs(t *testing.T, repo string) []string {
+	t.Helper()
+	ents, _ := os.ReadDir(filepath.Join(repo, "repodata"))
+	for _, e := range ents {
+		if !strings.HasSuffix(e.Name(), "primary.xml.zst") {
+			continue
+		}
+		f, err := os.Open(filepath.Join(repo, "repodata", e.Name()))
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer f.Close()
+		zr, err := zstd.NewReader(f)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer zr.Close()
+		b, _ := io.ReadAll(zr)
+		var out []string
+		for _, m := range regexp.MustCompile(`<location href="([^"]+)"`).FindAllStringSubmatch(string(b), -1) {
+			out = append(out, m[1])
+		}
+		sort.Strings(out)
+		return out
+	}
+	t.Fatal("no primary.xml.zst")
+	return nil
+}
+
+func TestRebuildUpdateProducesSamePackageSet(t *testing.T) {
+	p, s, _ := setup(t)
+	p.Incremental = true
+	repo := p.RepoDir("dev")
+	copyTestRPM(t, filepath.Join(repo, "a-1.rpm"))
+	if err := p.Rebuild(context.Background(), "dev"); err != nil {
+		t.Fatal(err)
+	}
+	copyTestRPM(t, filepath.Join(repo, "b-1.rpm"))
+	if err := p.Rebuild(context.Background(), "dev"); err != nil {
+		t.Fatal(err)
+	}
+	if got := primaryHrefs(t, repo); strings.Join(got, ",") != "a-1.rpm,b-1.rpm" {
+		t.Fatalf("got %v", got)
+	}
+	if err := verifyDir(t, s, filepath.Join(repo, "repodata")); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestRebuildAfterRemovingRpmDropsIt(t *testing.T) {
+	p, _, _ := setup(t)
+	p.Incremental = true
+	repo := p.RepoDir("dev")
+	copyTestRPM(t, filepath.Join(repo, "a-1.rpm"))
+	copyTestRPM(t, filepath.Join(repo, "b-1.rpm"))
+	if err := p.Rebuild(context.Background(), "dev"); err != nil {
+		t.Fatal(err)
+	}
+	if got := primaryHrefs(t, repo); len(got) != 2 {
+		t.Fatalf("precondition: %v", got)
+	}
+	os.Remove(filepath.Join(repo, "b-1.rpm"))
+	if err := p.Rebuild(context.Background(), "dev"); err != nil {
+		t.Fatal(err)
+	}
+	if got := primaryHrefs(t, repo); strings.Join(got, ",") != "a-1.rpm" {
+		t.Fatalf("deleted rpm still listed: %v", got)
 	}
 }

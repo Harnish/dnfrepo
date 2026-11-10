@@ -19,8 +19,11 @@ import (
 type Publisher struct {
 	dataDir string
 	signer  *signer.Signer
-	mu      sync.Mutex
-	locks   map[string]*sync.Mutex
+	// Incremental makes Rebuild reuse the previous repodata (createrepo_c --update).
+	// Off by default: measured no faster than a full build (see commit perf(publish)).
+	Incremental bool
+	mu          sync.Mutex
+	locks       map[string]*sync.Mutex
 }
 
 func New(dataDir string, s *signer.Signer) *Publisher {
@@ -56,7 +59,12 @@ func (p *Publisher) Rebuild(ctx context.Context, slug string) error {
 		return err
 	}
 	defer os.RemoveAll(build)
-	out, err := exec.CommandContext(ctx, "createrepo_c", "-q", "--outputdir", build, dir).CombinedOutput()
+	args := []string{"-q", "--outputdir", build}
+	old := filepath.Join(dir, "repodata")
+	if _, err := os.Stat(filepath.Join(old, "repomd.xml")); p.Incremental && err == nil {
+		args = append(args, "--update", "--update-md-path", old)
+	}
+	out, err := exec.CommandContext(ctx, "createrepo_c", append(args, dir)...).CombinedOutput()
 	if err != nil {
 		return fmt.Errorf("createrepo_c: %v: %s", err, out)
 	}

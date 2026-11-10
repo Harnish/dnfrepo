@@ -57,7 +57,7 @@ func main() {
 		}
 	}
 
-	pl := &pipeline.Service{Store: st, Publisher: pub, MaxBytes: cfg.MaxUploadBytes}
+	pl := &pipeline.Service{Store: st, Publisher: pub, MaxBytes: cfg.MaxUploadBytes, RebuildTimeout: cfg.RebuildTimeout}
 	if repos, err := st.ListRepos(ctx); err == nil {
 		for _, r := range repos {
 			if moved, err := pl.QuarantineOrphans(ctx, r.Slug); err != nil {
