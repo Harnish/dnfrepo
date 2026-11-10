@@ -6,6 +6,7 @@ import (
 	"net/netip"
 	"strconv"
 	"strings"
+	"time"
 )
 
 type Config struct {
@@ -16,6 +17,8 @@ type Config struct {
 	GitHubToken                               string
 	AdminEmail, AdminPassword                 string // optional local admin login (homelab); replaces OIDC when set
 	MaxUploadBytes                            int64
+	SecretKey                                 string        // optional; seals upstream credentials
+	RebuildTimeout                            time.Duration // metadata rebuild timeout
 }
 
 func Load(getenv func(string) string) (Config, error) {
@@ -38,6 +41,8 @@ func Load(getenv func(string) string) (Config, error) {
 		AdminEmail:       strings.ToLower(strings.TrimSpace(getenv("ADMIN_EMAIL"))),
 		AdminPassword:    getenv("ADMIN_PASSWORD"),
 		MaxUploadBytes:   1 << 30,
+		SecretKey:        getenv("SECRET_KEY"),
+		RebuildTimeout:   10 * time.Minute,
 	}
 	if c.DatabaseURL == "" {
 		return c, fmt.Errorf("DATABASE_URL required")
@@ -59,6 +64,13 @@ func Load(getenv func(string) string) (Config, error) {
 			return c, fmt.Errorf("MAX_UPLOAD_BYTES: %w", err)
 		}
 		c.MaxUploadBytes = n
+	}
+	if v := getenv("REBUILD_TIMEOUT"); v != "" {
+		d, err := time.ParseDuration(v)
+		if err != nil {
+			return c, fmt.Errorf("REBUILD_TIMEOUT: %w", err)
+		}
+		c.RebuildTimeout = d
 	}
 	for _, p := range strings.Split(getenv("TRUSTED_PROXIES"), ",") {
 		if p = strings.TrimSpace(p); p == "" {

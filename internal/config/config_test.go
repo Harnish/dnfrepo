@@ -4,6 +4,7 @@ import (
 	"net/netip"
 	"strings"
 	"testing"
+	"time"
 )
 
 func env(m map[string]string) func(string) string { return func(k string) string { return m[k] } }
@@ -80,5 +81,22 @@ func TestLoadLocalAdmin(t *testing.T) {
 	}
 	if _, err := Load(env(with("ADMIN_PASSWORD", "pw"))); err == nil {
 		t.Fatal("password without email accepted")
+	}
+}
+
+func TestLoadSecretKeyAndRebuildTimeout(t *testing.T) {
+	m := map[string]string{"DATABASE_URL": "p", "BASE_URL": "http://x", "OIDC_ISSUER": "i", "OIDC_CLIENT_ID": "c", "OIDC_CLIENT_SECRET": "s"}
+	c, err := Load(env(m))
+	if err != nil || c.RebuildTimeout != 10*time.Minute || c.SecretKey != "" {
+		t.Fatalf("defaults: %+v %v", c, err)
+	}
+	m["REBUILD_TIMEOUT"], m["SECRET_KEY"] = "30m", "k"
+	c, err = Load(env(m))
+	if err != nil || c.RebuildTimeout != 30*time.Minute || c.SecretKey != "k" {
+		t.Fatalf("override: %+v %v", c, err)
+	}
+	m["REBUILD_TIMEOUT"] = "abc"
+	if _, err := Load(env(m)); err == nil {
+		t.Fatal("invalid duration accepted")
 	}
 }
