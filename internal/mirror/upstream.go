@@ -19,7 +19,7 @@ import (
 
 	"github.com/ProtonMail/go-crypto/openpgp"
 	"github.com/klauspost/compress/zstd"
-	"github.com/ulikunitz/xz"
+	"github.com/xi2/xz"
 )
 
 // UpstreamPkg is one package listed in an upstream primary.xml. Every field has
@@ -45,7 +45,10 @@ type Upstream struct {
 
 var ErrChecksum = errors.New("checksum mismatch")
 
-const maxSig = 64 << 10
+const (
+	maxSig  = 64 << 10
+	maxDict = 64 << 20 // xz dictionary / zstd window cap for hostile primaries
+)
 
 func (u *Upstream) client() *http.Client {
 	if u.Client != nil {
@@ -178,14 +181,17 @@ func (u *Upstream) primary(ctx context.Context, href string, sum checksumXML) ([
 		}
 		dr = g
 	case ".zst":
-		z, err := zstd.NewReader(raw, zstd.WithDecoderConcurrency(1))
+		z, err := zstd.NewReader(raw, zstd.WithDecoderConcurrency(1),
+			zstd.WithDecoderMaxWindow(maxDict), zstd.WithDecoderMaxMemory(uint64(limit)))
 		if err != nil {
 			return nil, fmt.Errorf("primary metadata: %w", err)
 		}
 		defer z.Close()
 		dr = z
 	case ".xz":
-		x, err := xz.NewReader(raw)
+		// xi2/xz rejects a declared dictionary over maxDict before allocating it;
+		// ulikunitz/xz grows its dictionary to whatever the stream declares.
+		x, err := xz.NewReader(raw, maxDict)
 		if err != nil {
 			return nil, fmt.Errorf("primary metadata: %w", err)
 		}

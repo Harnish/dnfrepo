@@ -3,9 +3,14 @@ package mirror
 import (
 	"bytes"
 	"context"
+	"encoding/binary"
 	"errors"
+	"hash/crc32"
+	"runtime"
 	"strings"
 	"testing"
+
+	"github.com/ulikunitz/xz"
 )
 
 func TestPackagesParsesPrimaryGzZstXz(t *testing.T) {
@@ -199,5 +204,75 @@ func TestPrimaryDecompressionCapped(t *testing.T) {
 func TestBadBaseRejected(t *testing.T) {
 	if _, err := (&Upstream{Base: "ftp://h/x/"}).Packages(context.Background()); err == nil {
 		t.Fatal("ftp base accepted")
+	}
+}
+
+// hostileXZ returns a valid small .xz whose LZMA2 filter declares a 3 GiB
+// dictionary (props byte 39), with the block header CRC32 fixed up.
+func hostileXZ(t *testing.T) []byte {
+	var buf bytes.Buffer
+	w, err := xz.NewWriter(&buf)
+	if err != nil {
+		t.Fatal(err)
+	}
+	w.Write([]byte("<metadata/>"))
+	w.Close()
+	b := buf.Bytes()
+	hdr := 12 // stream header
+	size := (int(b[hdr]) + 1) * 4
+	flags := b[hdr+1]
+	i := hdr + 2
+	skipVarint := func() {
+		for b[i]&0x80 != 0 {
+			i++
+		}
+		i++
+	}
+	if flags&0x40 != 0 {
+		skipVarint()
+	}
+	if flags&0x80 != 0 {
+		skipVarint()
+	}
+	if b[i] != 0x21 || b[i+1] != 1 {
+		t.Fatalf("unexpected filter flags % x", b[i:i+3])
+	}
+	b[i+2] = 39
+	binary.LittleEndian.PutUint32(b[hdr+size-4:], crc32.ChecksumIEEE(b[hdr:hdr+size-4]))
+	return b
+}
+
+// primaryAllocs runs Packages and returns its error and the bytes allocated.
+func primaryAllocs(u *Upstream) (error, uint64) {
+	var before, after runtime.MemStats
+	runtime.GC()
+	runtime.ReadMemStats(&before)
+	_, err := u.Packages(context.Background())
+	runtime.ReadMemStats(&after)
+	return err, after.TotalAlloc - before.TotalAlloc
+}
+
+func TestHostileXZDictionaryRejected(t *testing.T) {
+	f := newFakeUpstream(t, fakeOpts{Compression: "xz"})
+	f.Override[f.primaryHref()] = hostileXZ(t)
+	err, alloc := primaryAllocs(&Upstream{Base: f.URL(), Username: "u", Token: "tok-secret"})
+	if err == nil || alloc > 256<<20 {
+		t.Fatalf("err=%v alloc=%d MiB", err, alloc>>20)
+	}
+	if strings.Contains(err.Error(), "tok-secret") || strings.Contains(err.Error(), "u:") {
+		t.Fatalf("credentials in error: %v", err)
+	}
+}
+
+func TestHostileZstdWindowRejected(t *testing.T) {
+	f := newFakeUpstream(t, fakeOpts{Compression: "zst"})
+	// magic, FHD 0 (window descriptor present), window 2^29, raw last block of 1 byte.
+	f.Override[f.primaryHref()] = []byte{0x28, 0xb5, 0x2f, 0xfd, 0x00, 0x98, 0x09, 0x00, 0x00, 'x'}
+	err, alloc := primaryAllocs(&Upstream{Base: f.URL(), Username: "u", Token: "tok-secret"})
+	if err == nil || alloc > 256<<20 {
+		t.Fatalf("err=%v alloc=%d MiB", err, alloc>>20)
+	}
+	if strings.Contains(err.Error(), "tok-secret") {
+		t.Fatalf("credentials in error: %v", err)
 	}
 }
