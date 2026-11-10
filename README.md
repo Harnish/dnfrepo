@@ -9,6 +9,7 @@ A web service that manages signed dnf/yum repositories: upload rpms or pull them
 - **Access, one mode per repo:** `public`, `ips` (IP/CIDR allowlist), or `users` (HTTP Basic auth with per-user tokens).
 - **Sources** (first stage only): GitHub latest-release rpm (`owner/name`) and Plex Media Server, checked daily or on demand.
 - **Retention:** per repo, keep only the newest N versions of each package (default limit plus per-package overrides; 0 = unlimited). Packages are grouped by name and arch and ordered with rpm's version comparison. Enforced after every upload or promotion into the repo and when the limits are saved; each stage has its own limits.
+- **Mirrors:** a repo can mirror an upstream dnf repo (see below).
 - Browse page, `<slug>.repo` file and RSS feed per repo, all under that repo's access rule.
 - React admin UI and a JSON API under `/api`.
 
@@ -46,8 +47,23 @@ Admin sign-in limits to know about:
 | `OIDC_ADMIN_GROUP` | `dnfrepo-admins` | Group whose members are admins |
 | `GITHUB_TOKEN` | empty | Avoids GitHub API rate limits for sources |
 | `MAX_UPLOAD_BYTES` | 1 GiB | Per-rpm upload limit |
+| `SECRET_KEY` | empty | Seals mirror upstream credentials (username/token) in the database. Needed only when a mirror uses credentials. If you remove or change it later, stored credentials can no longer be decrypted: clear them and enter them again |
+| `REBUILD_TIMEOUT` | `10m` | Cap for one metadata rebuild (Go duration, e.g. `30m`); raise it for very large mirrors |
 
 TLS is not handled by the app: put it behind a reverse proxy (and set `TRUSTED_PROXIES`). Use HTTPS for `users`-mode repos, since Basic auth sends the token on every request.
+
+## Mirror repos
+
+A mirror is an empty first-stage repo that copies an upstream dnf repo. Give it a base URL, or paste a `.repo` file and pick a section. Variables such as `$releasever` and `$basearch` are resolved once, when you save; a metalink or mirrorlist is resolved to its first URL then. Only the first `gpgkey` URL of a `.repo` section is used. Fedora example: one mirror per release and repo (for example `fedora-42` and `updates-42`), synced on the schedule you test against.
+
+- **Filters:** architectures, include/exclude globs on package name, and keep-latest N versions.
+- **Schedule:** manual, daily, weekly or monthly, with a time and time zone. A schedule missed while the service was down runs once at startup. Sync now runs on demand.
+- **Signature:** optionally verify upstream metadata with a GPG key. The mirror re-signs its own metadata with the instance key, so clients use this server's `/gpg.key`.
+- **Credentials:** optional username and token for the upstream, stored sealed with `SECRET_KEY` and never returned by the API.
+- **Batches:** every sync is a numbered batch. A batch can be promoted to the next stage as a unit.
+- **First sync:** a sync publishes only when it is fully downloaded and verified, so a big repo shows nothing until the whole first sync finishes. Syncs are additive: upstream deletions are not mirrored, and a package you delete by hand comes back at the next sync.
+- **Disk:** the mirror's size and the staging directory (`<DATA_DIR>/mirror-staging`) are the operator's concern. Staging is not cleaned up automatically. Internal and private upstream URLs are allowed (admins are trusted).
+- **Editing:** saving replaces every field except the credentials. Incremental `createrepo_c --update` exists but is off (no measured speedup). Frozen snapshot URLs are not supported yet (see `docs/TODO.md`).
 
 ## Client setup
 

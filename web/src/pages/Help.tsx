@@ -11,6 +11,9 @@ const terms: [string, string][] = [
   ['Retention (keep)', 'Keep only the newest N versions of each package (per name and architecture, per stage). 0 means keep everything. Older versions are purged automatically and logged.'],
   ['Activity', 'The audit log on each repo page: uploads, deletes, promotions and purges, with who did it.'],
   ['Admin API token', 'A secret for scripts and CI, created on the API tokens page. Sent as Authorization: Bearer. Different from a repo user token, which only reads repos.'],
+  ['Mirror', 'A first-stage repo that copies an upstream dnf repo instead of taking uploads. It is empty when created and cannot be put behind another repo. Filters and a schedule are optional.'],
+  ['Sync', 'One run of a mirror: fetch upstream metadata, download the new rpms that pass the filters, verify them, then publish all at once. Upstream deletions are not mirrored, and a package you delete by hand comes back next sync.'],
+  ['Batch', 'The packages added by one sync, numbered. Promote a whole batch to the next stage in one step; the batch id stays with the packages in later stages.'],
   ['GPG key', `Repo metadata is signed. Clients fetch the public key from ${o}/gpg.key.`],
 ]
 
@@ -38,6 +41,19 @@ const flows: { id: string; title: string; steps: React.ReactNode[] }[] = [
     <>Then <code>sudo dnf install &lt;package&gt;</code>.</>,
     <>For a <em>users</em> repo: create a repo user on <a href="/users">Repo users</a> (copy the token), grant the user on the repo page under <em>Access</em>, then download the .repo file with the credentials filled in.</>,
     <>For an <em>ips</em> repo: list the client’s IP or range under <em>Access</em>. Behind a reverse proxy, the proxy must be listed in TRUSTED_PROXIES or every client looks like the proxy.</>,
+  ] },
+  { id: 'mirror', title: 'Mirror a repo', steps: [
+    <>Create a repo (empty, first stage), open it and use <em>Mirror</em>. Enter the upstream URL, or paste a <code>.repo</code> file and choose a section. Variables like <code>$releasever</code> are filled in once, at save time.</>,
+    <>Optionally set architectures, include/exclude patterns, keep-latest, a GPG key to verify the upstream, and a username and token (needs <code>SECRET_KEY</code> on the server).</>,
+    <>Pick a schedule (manual, daily, weekly, monthly, with time zone) and save. Click <em>Sync now</em> to start; a schedule missed while the server was down runs once at startup.</>,
+    <>A sync publishes only when it is fully downloaded and verified, so a big first sync shows nothing until it finishes. Watch the status on the Mirror panel. Saving replaces every field except the credentials.</>,
+    <>Fedora: make one mirror per release and repo (for example <code>fedora-42</code>, <code>updates-42</code>) and sync on the schedule you test against. Disk use is yours to watch.</>,
+  ] },
+  { id: 'hub-spoke', title: 'Hub and spoke (dev → QA → prod sites)', steps: [
+    <>On the hub, make the repo <em>users</em> mode and create a repo user; copy the token.</>,
+    <>On the spoke server, create a repo and open <em>Mirror</em>. Use the hub’s <code>/r/&lt;slug&gt;/</code> URL, the repo user name and the token, and paste the hub’s <code>/gpg.key</code> as the GPG key with <em>require signature</em> on, so the spoke verifies what it pulls.</>,
+    <>The spoke signs with its own key. Clients of the spoke must use the spoke’s <code>/gpg.key</code>, not the hub’s.</>,
+    <>Promote a batch through the spoke’s own stages as usual.</>,
   ] },
   { id: 'retention', title: 'Keep old versions under control', steps: [
     <>On the repo page open <em>Retention</em>. Set <em>Default versions to keep</em>, and add per-package overrides if some packages need more.</>,
