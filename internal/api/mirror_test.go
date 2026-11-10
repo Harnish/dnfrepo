@@ -398,3 +398,27 @@ func TestPromoteBatchAndExclusiveBodyRule(t *testing.T) {
 		t.Fatalf("origin batch not carried: %v", names)
 	}
 }
+
+func TestPutMirrorFixups(t *testing.T) {
+	e, m, _ := mirrorEnv(t)
+	id := mkRepo(t, e, "dev", "").ID
+	// a mirrorlist entry with userinfo is refused
+	ml := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { fmt.Fprintln(w, "https://user:pw@host/") }))
+	defer ml.Close()
+	b, _ := json.Marshal(map[string]any{"repo_file": "[f]\nmirrorlist=" + ml.URL + "/list\n"})
+	if w := putMirror(t, e, "dev", string(b), 400); strings.Contains(w.Body.String(), "pw") {
+		t.Fatalf("echoes credentials: %s", w.Body)
+	}
+	// audit detail is redacted: no query
+	putMirror(t, e, "dev", `{"upstream_url":"https://h/x/?k=secret","username":"u","token":"t"}`, 200)
+	evs, _ := e.St.ListAudit(context.Background(), id, 1)
+	if len(evs) != 1 || evs[0].Action != "mirror-configured" || evs[0].Detail != "https://h/x/" {
+		t.Fatalf("audit: %+v", evs)
+	}
+	// without SECRET_KEY, stored credentials can't be kept
+	m.Box = nil
+	if w := putMirror(t, e, "dev", `{"upstream_url":"https://h/x/"}`, 400); !strings.Contains(w.Body.String(), "SECRET_KEY") {
+		t.Fatalf("message: %s", w.Body)
+	}
+	putMirror(t, e, "dev", `{"upstream_url":"https://h/x/","clear_credentials":true}`, 200)
+}

@@ -105,7 +105,7 @@ jq -n --arg tok "$UPSTREAM_TOKEN" '{upstream_url:"https://pkgs.example.org/el9/x
 ```
 
 - Variables are substituted and a metalink/mirrorlist is resolved to its first URL now; the resolved URL is stored. From a `.repo` file an http(s) `gpgkey` is fetched and `repo_gpgcheck=1` sets `require_signature`; `username`/`password` become the credentials.
-- Omitting `token` keeps the stored one; `clear_credentials:true` removes username and token.
+- PUT replaces every field except the credentials: an omitted `gpg_key`, filter or `schedule` is cleared. Omitting `token` keeps the stored one (this needs `SECRET_KEY`); `token:""` clears it; `clear_credentials:true` removes username and token. Only the first http(s) `gpgkey` URL of a `.repo` section is used.
 - `200`: the config (as GET). `400`: bad URL or schedule, `{"error","missing_vars":[...]}`, `{"error","sections":[ids]}` when a section must be chosen, credentials without `SECRET_KEY`, `require_signature` without a key. `409`: repo has packages or sources, or is a later stage.
 
 ### Read / remove: `GET`, `DELETE /api/repos/{slug}/mirror`

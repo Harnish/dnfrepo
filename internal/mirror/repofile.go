@@ -155,6 +155,9 @@ func redact(u string) string {
 	return p.Scheme + "://" + p.Host + p.Path
 }
 
+// Redact is redact for callers outside the package (audit details).
+func Redact(u string) string { return redact(u) }
+
 func isHTTP(u string) bool {
 	return strings.HasPrefix(u, "http://") || strings.HasPrefix(u, "https://")
 }

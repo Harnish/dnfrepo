@@ -328,6 +328,10 @@ func (a *Mirrors) put(w http.ResponseWriter, r *http.Request) {
 			tokenEnc = nil
 		}
 	}
+	if a.Box == nil && pass == "" && len(tokenEnc) > 0 {
+		errJSON(w, 400, "keeping the stored upstream credentials needs SECRET_KEY to be set on the server; send clear_credentials to drop them")
+		return
+	}
 	if pass != "" {
 		if a.Box == nil {
 			errJSON(w, 400, "upstream credentials need SECRET_KEY to be set on the server")
@@ -348,6 +352,10 @@ func (a *Mirrors) put(w http.ResponseWriter, r *http.Request) {
 	}
 	if err != nil {
 		errJSON(w, 400, "resolve "+kind+": "+err.Error()) // errors carry only the redacted URL
+		return
+	}
+	if !httpURL(u) {
+		errJSON(w, 400, "resolved "+kind+" URL must be http or https without embedded credentials")
 		return
 	}
 	key := in.GPGKey
@@ -377,7 +385,7 @@ func (a *Mirrors) put(w http.ResponseWriter, r *http.Request) {
 		mirrorErr(w, err)
 		return
 	}
-	a.audit(r, repo.ID, "mirror-configured", u)
+	a.audit(r, repo.ID, "mirror-configured", mirror.Redact(u))
 	saved, err := a.Store.MirrorByRepo(ctx, repo.ID)
 	if err != nil {
 		mirrorErr(w, err)
