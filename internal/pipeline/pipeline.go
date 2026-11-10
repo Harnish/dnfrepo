@@ -24,6 +24,7 @@ var (
 	ErrExists        = errors.New("package file already exists")
 	ErrBadFilename   = errors.New("invalid rpm filename")
 	ErrTooLarge      = errors.New("upload too large")
+	ErrBadChecksum   = errors.New("staged file does not match its recorded checksum/size")
 )
 
 var filenameRe = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._+~-]*\.rpm$`)
@@ -41,6 +42,8 @@ type Service struct {
 	Store     *store.Store
 	Publisher Publisher
 	MaxBytes  int64
+	// RebuildTimeout bounds one metadata rebuild; values <= 0 mean 10 minutes.
+	RebuildTimeout time.Duration
 
 	locks sync.Map // slug -> *sync.Mutex
 }
@@ -57,7 +60,11 @@ func (s *Service) lock(slug string) (unlock func()) {
 // rebuild runs detached from the caller's cancellation: once an operation has committed,
 // a client disconnect must not leave the published metadata stale.
 func (s *Service) rebuild(ctx context.Context, slug string) error {
-	rctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 10*time.Minute)
+	d := s.RebuildTimeout
+	if d <= 0 {
+		d = 10 * time.Minute
+	}
+	rctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), d)
 	defer cancel()
 	return s.Publisher.Rebuild(rctx, slug)
 }
@@ -72,6 +79,12 @@ func (s *Service) Upload(ctx context.Context, slug, filename string, r io.Reader
 	}
 	if repo.PreviousID != nil {
 		return store.Package{}, ErrNotFirstStage
+	}
+	// Fail fast; the real guard is the transactional check in AddPackageFirstStage.
+	if mirror, err := s.Store.IsMirror(ctx, repo.ID); err != nil {
+		return store.Package{}, err
+	} else if mirror {
+		return store.Package{}, store.ErrMirrorRepo
 	}
 	defer s.lock(slug)()
 	dir := s.Publisher.RepoDir(slug)

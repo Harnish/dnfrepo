@@ -126,7 +126,8 @@ func (s *Store) AddPackagesAudited(ctx context.Context, repoID int64, pkgs []Pac
 
 // AddPackageFirstStage is AddPackage for uploads: it fails with ErrLaterStage unless the
 // repo is a first stage, and holds a share lock on the repo row so a concurrent SetPrevious
-// cannot link the repo behind another one while the insert is in flight.
+// cannot link the repo behind another one while the insert is in flight. Mirror repos are
+// refused (ErrMirrorRepo) in the same transaction; only AddMirrorPackages may fill them.
 func (s *Store) AddPackageFirstStage(ctx context.Context, p Package) (Package, error) {
 	tx, err := s.pool.Begin(ctx)
 	if err != nil {
@@ -142,6 +143,13 @@ func (s *Store) AddPackageFirstStage(ctx context.Context, p Package) (Package, e
 	}
 	if prev != nil {
 		return Package{}, ErrLaterStage
+	}
+	var mirror bool
+	if err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM mirrors WHERE repo_id=$1)`, p.RepoID).Scan(&mirror); err != nil {
+		return Package{}, err
+	}
+	if mirror {
+		return Package{}, ErrMirrorRepo
 	}
 	out, err := scanPkg(tx.QueryRow(ctx, `
 		INSERT INTO packages(repo_id, filename, name, version, release, arch, sha256, size)

@@ -140,6 +140,19 @@ func (s *Service) Promote(ctx context.Context, fromSlug string, filenames []stri
 	return res, nil
 }
 
+// PromoteBatch promotes every package in fromSlug that originated from the sync batch.
+func (s *Service) PromoteBatch(ctx context.Context, fromSlug string, batchID int64, actor string) (PromoteResult, error) {
+	from, err := s.Store.RepoBySlug(ctx, fromSlug)
+	if err != nil {
+		return PromoteResult{}, err
+	}
+	names, err := s.Store.BatchFilenames(ctx, from.ID, batchID)
+	if err != nil {
+		return PromoteResult{}, err
+	}
+	return s.Promote(ctx, fromSlug, names, actor) // empty -> ErrEmptyPromotion
+}
+
 // linkOrCopy hardlinks src to dst, falling back to a copy across filesystems.
 func linkOrCopy(src, dst string) error {
 	if err := os.Link(src, dst); err == nil {

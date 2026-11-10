@@ -174,3 +174,23 @@ func TestMirrorRepoRejectsSourceAndLinking(t *testing.T) {
 		t.Errorf("SetPrevious: %v", err)
 	}
 }
+
+func TestAddPackageFirstStageRefusesMirrorRepo(t *testing.T) {
+	s := storetest.New(t)
+	ctx := context.Background()
+	r := mustRepo(t, s, "m", nil)
+	if err := s.SetMirror(ctx, store.Mirror{RepoID: r.ID, UpstreamURL: "u"}); err != nil {
+		t.Fatal(err)
+	}
+	p := bpkg(r.ID, "a-1-1.x86_64.rpm", nil)
+	if _, err := s.AddPackageFirstStage(ctx, p); !errors.Is(err, store.ErrMirrorRepo) {
+		t.Fatalf("want ErrMirrorRepo, got %v", err)
+	}
+	if ps, _ := s.ListPackages(ctx, r.ID); len(ps) != 0 {
+		t.Fatalf("rows inserted: %+v", ps)
+	}
+	id, _ := s.CreateBatch(ctx, r.ID)
+	if err := s.AddMirrorPackages(ctx, r.ID, id, []store.Package{p}, "mirror"); err != nil {
+		t.Fatalf("mirror path must still work: %v", err)
+	}
+}
