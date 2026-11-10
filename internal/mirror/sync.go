@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
@@ -154,6 +155,9 @@ func (s *Syncer) run(ctx context.Context, repoID int64, actor string, token *str
 		return Result{Status: "up to date"}, nil
 	}
 
+	if s.StagingDir == "" {
+		return Result{}, errors.New("mirror staging dir is not configured")
+	}
 	dir := filepath.Join(s.StagingDir, strconv.FormatInt(repoID, 10))
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return Result{}, fmt.Errorf("staging dir: %w", err)
@@ -200,6 +204,8 @@ func dedupe(in []UpstreamPkg) ([]UpstreamPkg, error) {
 	return out, nil
 }
 
+var shaRe = regexp.MustCompile(`^[0-9a-f]{64}$`)
+
 // stageAll downloads want into dir with at most Concurrency in flight. A
 // failure does not cancel sibling downloads, so whatever verifies is kept for
 // the retry; ctx cancellation stops them all.
@@ -207,6 +213,11 @@ func (s *Syncer) stageAll(ctx context.Context, up *Upstream, dir string, want []
 	n := s.Concurrency
 	if n <= 0 {
 		n = defaultConcurrency
+	}
+	for _, p := range want { // the checksum names the staged file: never let it leave dir
+		if !shaRe.MatchString(p.SHA256) || filepath.Dir(filepath.Join(dir, p.SHA256)) != dir {
+			return nil, fmt.Errorf("package %q: invalid sha256", p.Filename)
+		}
 	}
 	var g errgroup.Group
 	g.SetLimit(n)
@@ -270,7 +281,7 @@ func verified(path string, p UpstreamPkg) (bool, error) {
 		return false, fmt.Errorf("stage %s: %w", p.Filename, err)
 	}
 	h := sha256.New()
-	n, err := io.Copy(h, f)
+	n, err := io.Copy(h, io.LimitReader(f, p.Size+1))
 	f.Close()
 	if err == nil && n == p.Size && hex.EncodeToString(h.Sum(nil)) == p.SHA256 {
 		return true, nil

@@ -311,6 +311,7 @@ func TestRunConflictingSameNameFileFails(t *testing.T) {
 		t.Fatal(err)
 	}
 	p.Body = fixture(t, "hello-1.9.0-1.noarch") // same filename, different content
+	files, hits := e.repoFiles(), e.up.Hits(p.Href)
 	_, err := e.run(context.Background())
 	if !errors.Is(err, ErrConflict) {
 		t.Fatalf("err=%v", err)
@@ -321,6 +322,52 @@ func TestRunConflictingSameNameFileFails(t *testing.T) {
 	if len(e.batches()) != 1 || len(e.rows()) != 1 {
 		t.Errorf("repo changed")
 	}
+	if got := e.repoFiles(); strings.Join(got, ",") != strings.Join(files, ",") {
+		t.Errorf("repo files %v -> %v", files, got)
+	}
+	if e.pub.rebuilds != 1 {
+		t.Errorf("rebuilds=%d", e.pub.rebuilds)
+	}
+	if n := e.up.Hits(p.Href); n != hits {
+		t.Errorf("downloaded %d rpms", n-hits)
+	}
+}
+
+func TestStageAllRejectsUnsafeChecksum(t *testing.T) {
+	root := t.TempDir()
+	dir := filepath.Join(root, "1")
+	if err := os.Mkdir(dir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	victim := filepath.Join(root, "x")
+	if err := os.WriteFile(victim, []byte("keep"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	s := &Syncer{}
+	up := &Upstream{Base: "http://127.0.0.1:1/"}
+	for _, sha := range []string{"../x", strings.Repeat("A", 64), ""} {
+		_, err := s.stageAll(context.Background(), up, dir, []UpstreamPkg{{Filename: "x.rpm", Href: "x.rpm", SHA256: sha, Size: 4}})
+		if err == nil || !strings.Contains(err.Error(), "invalid sha256") {
+			t.Errorf("%q: err=%v", sha, err)
+		}
+	}
+	if b, err := os.ReadFile(victim); err != nil || string(b) != "keep" {
+		t.Errorf("file outside staging touched: %q %v", b, err)
+	}
+	if f := filesIn(dir); len(f) != 0 {
+		t.Errorf("staged=%v", f)
+	}
+}
+
+func TestRunRejectsEmptyStagingDir(t *testing.T) {
+	e := newSyncEnv(t, fakeOpts{}, nil)
+	e.add("hello-1.2.3-4.noarch")
+	e.s.StagingDir = ""
+	_, err := e.run(context.Background())
+	if err == nil || !strings.Contains(err.Error(), "staging dir") {
+		t.Fatalf("err=%v", err)
+	}
+	e.assertUnchanged()
 }
 
 func TestRunRespectsKeepNoRedownload(t *testing.T) {
