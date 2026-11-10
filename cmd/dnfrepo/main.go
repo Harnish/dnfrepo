@@ -81,7 +81,7 @@ func main() {
 		}
 	}
 	// staging sits under DATA_DIR (same filesystem as the repos, so ingest can hardlink) but outside repos/
-	syncer := &mirror.Syncer{Store: st, Pipeline: pl, Box: box, StagingDir: filepath.Join(cfg.DataDir, "mirror-staging")}
+	syncer := &mirror.Syncer{Store: st, Pipeline: pl, Box: box, StagingDir: filepath.Join(cfg.DataDir, "mirror-staging"), MaxRPMBytes: cfg.MaxUploadBytes}
 	syncer.Start(ctx)
 
 	actor := func(r *http.Request) string { e, _ := admin.Authenticate(r); return e }
