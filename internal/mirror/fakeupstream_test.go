@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/ProtonMail/go-crypto/openpgp"
@@ -51,6 +52,8 @@ type fakeUpstream struct {
 	Override      map[string][]byte // URL path (no leading slash) -> body served instead
 	Dropped       map[string]bool   // URL path (no leading slash) -> 404
 	Requests      []*http.Request
+
+	mu sync.Mutex // guards Requests while downloads run concurrently
 }
 
 func newFakeUpstream(t *testing.T, opts fakeOpts) *fakeUpstream {
@@ -90,6 +93,19 @@ func (f *fakeUpstream) Corrupt(p *fakePkg) {
 	b := bytes.Clone(p.Body)
 	b[len(b)-1] ^= 0xff
 	f.Override[p.Href] = b
+}
+
+// Hits counts requests for path (no leading slash) so far.
+func (f *fakeUpstream) Hits(path string) int {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	n := 0
+	for _, r := range f.Requests {
+		if strings.TrimPrefix(r.URL.Path, "/") == path {
+			n++
+		}
+	}
+	return n
 }
 
 // Drop makes path (no leading slash) return 404.
@@ -171,7 +187,9 @@ func (f *fakeUpstream) repomd() []byte {
 }
 
 func (f *fakeUpstream) serve(w http.ResponseWriter, r *http.Request) {
+	f.mu.Lock()
 	f.Requests = append(f.Requests, r)
+	f.mu.Unlock()
 	if f.opts.Username != "" {
 		if u, p, ok := r.BasicAuth(); !ok || u != f.opts.Username || p != f.opts.Password {
 			http.Error(w, "unauthorized", http.StatusUnauthorized)
