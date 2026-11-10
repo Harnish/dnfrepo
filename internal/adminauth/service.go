@@ -37,17 +37,23 @@ type IDP struct {
 }
 
 type Service struct {
-	st      *store.Store
-	idp     IDP
-	baseURL string
-	group   string
-	trusted []netip.Prefix
-	th      *access.Throttle // failed-callback throttle, per client IP
+	st       *store.Store
+	idp      IDP
+	baseURL  string
+	group    string
+	trusted  []netip.Prefix
+	th       *access.Throttle // failed-callback throttle, per client IP
+	local    [2][32]byte      // sha256(email), sha256(password) of the optional local admin; zero = disabled
+	hasLocal bool
 }
 
 func New(st *store.Store, cfg config.Config, idp IDP) *Service {
-	return &Service{st: st, idp: idp, baseURL: cfg.BaseURL, group: cfg.OIDCAdminGroup,
+	s := &Service{st: st, idp: idp, baseURL: cfg.BaseURL, group: cfg.OIDCAdminGroup,
 		trusted: cfg.TrustedProxies, th: access.NewThrottle()}
+	if cfg.AdminEmail != "" {
+		s.hasLocal, s.local = true, [2][32]byte{sha256.Sum256([]byte(strings.ToLower(strings.TrimSpace(cfg.AdminEmail)))), sha256.Sum256([]byte(cfg.AdminPassword))}
+	}
+	return s
 }
 
 func randToken() string {

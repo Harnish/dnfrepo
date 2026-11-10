@@ -228,3 +228,69 @@ func TestCallbackThrottledPerIP(t *testing.T) {
 		t.Fatalf("other IP: %d", c)
 	}
 }
+
+func localHandler(t *testing.T) (*Service, http.Handler) {
+	t.Helper()
+	s := New(storetest.New(t), config.Config{BaseURL: "http://x", AdminEmail: "Joe@Home.lan", AdminPassword: "s3cret"}, (&fakeIDP{}).idp())
+	mux := http.NewServeMux()
+	s.PublicRoutes(mux)
+	s.AdminRoutes(mux)
+	return s, mux
+}
+
+func localLogin(h http.Handler, remote, body string) *httptest.ResponseRecorder {
+	r := httptest.NewRequest("POST", "/api/auth/local", strings.NewReader(body))
+	r.RemoteAddr = remote
+	w := httptest.NewRecorder()
+	h.ServeHTTP(w, r)
+	return w
+}
+
+func TestLocalLoginGivesSession(t *testing.T) {
+	s, h := localHandler(t)
+	w := localLogin(h, "1.1.1.1:1", `{"email":" joe@home.lan ","password":"s3cret"}`)
+	c := sessionCookie(w)
+	if w.Code != http.StatusOK || c == nil || !c.HttpOnly {
+		t.Fatalf("local login: %d %+v", w.Code, c)
+	}
+	r := httptest.NewRequest("GET", "/api/auth/me", nil)
+	r.AddCookie(c)
+	if email, ok := s.Authenticate(r); !ok || email != "joe@home.lan" {
+		t.Fatalf("authenticate: %q %v", email, ok)
+	}
+}
+
+func TestLocalLoginRejectsBadCredentials(t *testing.T) {
+	_, h := localHandler(t)
+	for _, b := range []string{`{"email":"joe@home.lan","password":"nope"}`, `{"email":"eve@home.lan","password":"s3cret"}`, `{}`, `junk`} {
+		if w := localLogin(h, "1.1.1.1:1", b); w.Code != http.StatusUnauthorized || sessionCookie(w) != nil {
+			t.Fatalf("%s: %d", b, w.Code)
+		}
+	}
+}
+
+func TestLocalLoginThrottled(t *testing.T) {
+	_, h := localHandler(t)
+	var last int
+	for i := 0; i < 50; i++ {
+		last = localLogin(h, "2.2.2.2:1", `{"email":"joe@home.lan","password":"bad"}`).Code
+	}
+	if last != http.StatusTooManyRequests {
+		t.Fatalf("not throttled: %d", last)
+	}
+	if w := localLogin(h, "2.2.2.2:1", `{"email":"joe@home.lan","password":"s3cret"}`); w.Code != http.StatusTooManyRequests {
+		t.Fatalf("blocked IP got in: %d", w.Code)
+	}
+}
+
+func TestLocalLoginAbsentUnlessConfigured(t *testing.T) {
+	_, h := newHandler(t, &fakeIDP{})
+	if w := localLogin(h, "1.1.1.1:1", `{"email":"","password":""}`); w.Code != http.StatusNotFound && w.Code != http.StatusMethodNotAllowed {
+		t.Fatalf("local route exists unconfigured: %d", w.Code)
+	}
+	w := httptest.NewRecorder()
+	h.ServeHTTP(w, httptest.NewRequest("GET", "/api/auth/methods", nil))
+	if !strings.Contains(w.Body.String(), `"local":false`) {
+		t.Fatalf("methods: %s", w.Body.String())
+	}
+}

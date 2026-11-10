@@ -40,8 +40,9 @@ Admin sign-in limits to know about:
 | `LISTEN_ADDR` | `:8080` | HTTP listen address |
 | `DATA_DIR` | `/data` | rpms, metadata, and the GPG key (`gpg/signing-key.asc`, mode 0600) — back this up |
 | `TRUSTED_PROXIES` | empty | Comma-separated IPs/CIDRs of reverse proxies whose `X-Forwarded-For` is trusted (needed for `ips` mode behind a proxy) |
-| `OIDC_ISSUER` | required | Issuer URL, e.g. `https://auth.example.org/application/o/<slug>/` |
-| `OIDC_CLIENT_ID` `OIDC_CLIENT_SECRET` | required | From the Authentik provider |
+| `ADMIN_EMAIL` `ADMIN_PASSWORD` | empty | Homelab bypass: set both and the login page shows an email/password form instead of Authentik; the `OIDC_*` vars then become optional. One shared admin, same 12 h session and per-IP throttle. Use a long random password and keep it in a Secret |
+| `OIDC_ISSUER` | required (unless local admin set) | Issuer URL, e.g. `https://auth.example.org/application/o/<slug>/` |
+| `OIDC_CLIENT_ID` `OIDC_CLIENT_SECRET` | required (unless local admin set) | From the Authentik provider |
 | `OIDC_ADMIN_GROUP` | `dnfrepo-admins` | Group whose members are admins |
 | `GITHUB_TOKEN` | empty | Avoids GitHub API rate limits for sources |
 | `MAX_UPLOAD_BYTES` | 1 GiB | Per-rpm upload limit |

@@ -14,6 +14,7 @@ type Config struct {
 	OIDCIssuer, OIDCClientID                  string
 	OIDCClientSecret, OIDCAdminGroup          string
 	GitHubToken                               string
+	AdminEmail, AdminPassword                 string // optional local admin login (homelab); replaces OIDC when set
 	MaxUploadBytes                            int64
 }
 
@@ -34,6 +35,8 @@ func Load(getenv func(string) string) (Config, error) {
 		OIDCClientSecret: getenv("OIDC_CLIENT_SECRET"),
 		OIDCAdminGroup:   def("OIDC_ADMIN_GROUP", "dnfrepo-admins"),
 		GitHubToken:      getenv("GITHUB_TOKEN"),
+		AdminEmail:       strings.ToLower(strings.TrimSpace(getenv("ADMIN_EMAIL"))),
+		AdminPassword:    getenv("ADMIN_PASSWORD"),
 		MaxUploadBytes:   1 << 30,
 	}
 	if c.DatabaseURL == "" {
@@ -42,8 +45,11 @@ func Load(getenv func(string) string) (Config, error) {
 	if c.BaseURL == "" {
 		return c, fmt.Errorf("BASE_URL required")
 	}
+	if (c.AdminEmail == "") != (c.AdminPassword == "") {
+		return c, fmt.Errorf("ADMIN_EMAIL and ADMIN_PASSWORD must be set together")
+	}
 	for k, v := range map[string]string{"OIDC_ISSUER": c.OIDCIssuer, "OIDC_CLIENT_ID": c.OIDCClientID, "OIDC_CLIENT_SECRET": c.OIDCClientSecret} {
-		if v == "" {
+		if v == "" && c.AdminEmail == "" { // local admin login replaces OIDC
 			return c, fmt.Errorf("%s required", k)
 		}
 	}

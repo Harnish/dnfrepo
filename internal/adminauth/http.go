@@ -51,6 +51,12 @@ func CSRF(next http.Handler) http.Handler {
 
 // PublicRoutes registers the OIDC login endpoints, usable without a session.
 func (s *Service) PublicRoutes(mux *http.ServeMux) {
+	mux.HandleFunc("GET /api/auth/methods", func(w http.ResponseWriter, r *http.Request) {
+		writeJSON(w, 200, map[string]bool{"local": s.hasLocal})
+	})
+	if s.hasLocal {
+		mux.HandleFunc("POST /api/auth/local", s.localLogin)
+	}
 	mux.HandleFunc("GET /api/auth/oidc/login", func(w http.ResponseWriter, r *http.Request) {
 		state, nonce, verifier := randToken(), randToken(), randToken()
 		sum := sha256.Sum256([]byte(verifier))
@@ -114,4 +120,31 @@ func (s *Service) AdminRoutes(mux *http.ServeMux) {
 		email, _ := s.Authenticate(r)
 		writeJSON(w, 200, map[string]string{"email": email})
 	})
+}
+
+// localLogin signs in the single ADMIN_EMAIL/ADMIN_PASSWORD admin. Same throttle and session as OIDC.
+func (s *Service) localLogin(w http.ResponseWriter, r *http.Request) {
+	ip := access.ClientIP(r, s.trusted)
+	if !s.th.Attempt(ip) { // counted before checking
+		errJSON(w, http.StatusTooManyRequests, "too many attempts; try again later")
+		return
+	}
+	var b struct{ Email, Password string }
+	json.NewDecoder(http.MaxBytesReader(w, r.Body, 4096)).Decode(&b)
+	email := strings.ToLower(strings.TrimSpace(b.Email))
+	e, p := sha256.Sum256([]byte(email)), sha256.Sum256([]byte(b.Password))
+	// hashes compared in constant time; both compared so a wrong email isn't distinguishable by timing
+	okE, okP := subtle.ConstantTimeCompare(e[:], s.local[0][:]), subtle.ConstantTimeCompare(p[:], s.local[1][:])
+	if okE&okP != 1 {
+		errJSON(w, http.StatusUnauthorized, "invalid email or password")
+		return
+	}
+	tok, err := s.newSession(r.Context(), email)
+	if err != nil {
+		errJSON(w, http.StatusServiceUnavailable, "try again")
+		return
+	}
+	s.th.Reset(ip)
+	http.SetCookie(w, s.cookie(SessionCookie, tok, int(sessionTTL.Seconds())))
+	writeJSON(w, 200, map[string]string{"status": "ok"})
 }

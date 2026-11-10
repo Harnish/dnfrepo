@@ -58,3 +58,27 @@ func TestLoadParsesTrustedProxies(t *testing.T) {
 		t.Fatalf("got %v", c.TrustedProxies)
 	}
 }
+
+func TestLoadLocalAdmin(t *testing.T) {
+	base := map[string]string{"DATABASE_URL": "p", "BASE_URL": "http://x"}
+	with := func(kv ...string) map[string]string {
+		m := map[string]string{}
+		for k, v := range base {
+			m[k] = v
+		}
+		for i := 0; i < len(kv); i += 2 {
+			m[kv[i]] = kv[i+1]
+		}
+		return m
+	}
+	c, err := Load(env(with("ADMIN_EMAIL", "a@b.c", "ADMIN_PASSWORD", "pw")))
+	if err != nil || c.AdminEmail != "a@b.c" || c.AdminPassword != "pw" {
+		t.Fatalf("local-only: %+v %v", c, err)
+	}
+	if _, err := Load(env(with("ADMIN_EMAIL", "a@b.c"))); err == nil {
+		t.Fatal("email without password accepted")
+	}
+	if _, err := Load(env(with("ADMIN_PASSWORD", "pw"))); err == nil {
+		t.Fatal("password without email accepted")
+	}
+}

@@ -31,6 +31,8 @@ const e = encodeURIComponent
 
 export const api = {
   me: () => req<{ email: string }>('GET', '/api/auth/me'),
+  methods: () => req<{ local: boolean }>('GET', '/api/auth/methods'),
+  localLogin: (email: string, password: string) => req<unknown>('POST', '/api/auth/local', { email, password }),
   logout: () => req<unknown>('POST', '/api/auth/logout'),
 
   repos: () => req<Repo[]>('GET', '/api/repos'),
