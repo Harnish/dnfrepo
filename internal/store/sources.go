@@ -28,7 +28,28 @@ func scanSrc(row pgx.Row) (Source, error) {
 }
 
 func (s *Store) AddSource(ctx context.Context, repoID int64, kind, spec string) (Source, error) {
-	return scanSrc(s.pool.QueryRow(ctx, `INSERT INTO sources(repo_id, kind, spec) VALUES($1,$2,$3) RETURNING `+srcCols, repoID, kind, spec))
+	tx, err := s.pool.Begin(ctx)
+	if err != nil {
+		return Source{}, err
+	}
+	defer tx.Rollback(ctx)
+	// share lock pairs with SetMirror's FOR UPDATE so a repo can't gain a source while becoming a mirror
+	var id int64
+	if err := tx.QueryRow(ctx, `SELECT id FROM repos WHERE id=$1 FOR SHARE`, repoID).Scan(&id); err != nil && !errors.Is(err, pgx.ErrNoRows) {
+		return Source{}, err
+	}
+	var mirror bool
+	if err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM mirrors WHERE repo_id=$1)`, repoID).Scan(&mirror); err != nil {
+		return Source{}, err
+	}
+	if mirror {
+		return Source{}, ErrMirrorRepo
+	}
+	out, err := scanSrc(tx.QueryRow(ctx, `INSERT INTO sources(repo_id, kind, spec) VALUES($1,$2,$3) RETURNING `+srcCols, repoID, kind, spec))
+	if err != nil {
+		return Source{}, err
+	}
+	return out, tx.Commit(ctx)
 }
 
 func (s *Store) SourceByID(ctx context.Context, id int64) (Source, error) {

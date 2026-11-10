@@ -159,6 +159,13 @@ func (s *Store) SetPrevious(ctx context.Context, id int64, previousID *int64) er
 		return err
 	}
 	if previousID != nil {
+		var mirror bool
+		if err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM mirrors WHERE repo_id=$1)`, id).Scan(&mirror); err != nil {
+			return err
+		}
+		if mirror {
+			return ErrMirrorRepo
+		}
 		var n int
 		if err := tx.QueryRow(ctx, `SELECT (SELECT count(*) FROM packages WHERE repo_id=$1) + (SELECT count(*) FROM sources WHERE repo_id=$1)`, id).Scan(&n); err != nil {
 			return err
