@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"regexp"
 	"sort"
 	"strings"
@@ -45,7 +46,9 @@ func ParseRepoFile(text string) ([]RepoSection, error) {
 		}
 		if raw[0] == ' ' || raw[0] == '\t' { // continuation line
 			if lastKey == "baseurl" && cur.BaseURL == "" {
-				cur.BaseURL = line
+				if f := strings.Fields(line); len(f) > 0 {
+					cur.BaseURL = f[0]
+				}
 			}
 			continue
 		}
@@ -142,6 +145,20 @@ func ResolveVars(s string, vars map[string]string) (string, []string) {
 
 const maxBody = 1 << 20
 
+// redact keeps scheme, host and path only: no userinfo, no query, so upstream
+// credentials never reach an error string.
+func redact(u string) string {
+	p, err := url.Parse(u)
+	if err != nil {
+		return "<invalid url>"
+	}
+	return p.Scheme + "://" + p.Host + p.Path
+}
+
+func isHTTP(u string) bool {
+	return strings.HasPrefix(u, "http://") || strings.HasPrefix(u, "https://")
+}
+
 func fetch(ctx context.Context, c *http.Client, u string) ([]byte, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u, nil)
 	if err != nil {
@@ -149,18 +166,22 @@ func fetch(ctx context.Context, c *http.Client, u string) ([]byte, error) {
 	}
 	resp, err := c.Do(req)
 	if err != nil {
-		return nil, err
+		var ue *url.Error
+		if errors.As(err, &ue) {
+			err = ue.Err // drop the embedded full URL
+		}
+		return nil, fmt.Errorf("GET %s: %w", redact(u), err)
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("GET %s: status %d", u, resp.StatusCode)
+		return nil, fmt.Errorf("GET %s: status %d", redact(u), resp.StatusCode)
 	}
 	b, err := io.ReadAll(io.LimitReader(resp.Body, maxBody+1))
 	if err != nil {
 		return nil, err
 	}
 	if len(b) > maxBody {
-		return nil, fmt.Errorf("GET %s: response over %d bytes", u, maxBody)
+		return nil, fmt.Errorf("GET %s: response over %d bytes", redact(u), maxBody)
 	}
 	return b, nil
 }
@@ -182,7 +203,7 @@ func ResolveMetalink(ctx context.Context, c *http.Client, metalinkURL string) (s
 		return "", fmt.Errorf("parse metalink: %w", err)
 	}
 	for _, u := range doc.URLs {
-		if u = strings.TrimSpace(u); strings.HasSuffix(u, repomdSuffix) {
+		if u = strings.TrimSpace(u); isHTTP(u) && strings.HasSuffix(u, repomdSuffix) {
 			return strings.TrimSuffix(u, repomdSuffix), nil
 		}
 	}
@@ -196,7 +217,7 @@ func ResolveMirrorList(ctx context.Context, c *http.Client, listURL string) (str
 		return "", err
 	}
 	for _, l := range strings.Split(string(b), "\n") {
-		if l = strings.TrimSpace(l); l != "" && l[0] != '#' {
+		if l = strings.TrimSpace(l); isHTTP(l) {
 			return l, nil
 		}
 	}

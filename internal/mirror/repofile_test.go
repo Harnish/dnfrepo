@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"reflect"
+	"strings"
 	"testing"
 )
 
@@ -125,6 +126,58 @@ func TestResolveMirrorList(t *testing.T) {
 	defer srv.Close()
 	got, err := ResolveMirrorList(context.Background(), srv.Client(), srv.URL)
 	if err != nil || got != "http://first.example/os/" {
+		t.Fatal(got, err)
+	}
+}
+
+func TestParseBaseURLContinuationMultiURL(t *testing.T) {
+	got, err := ParseRepoFile("[a]\nbaseurl=\n  https://a/x/ https://b/y/\n")
+	if err != nil || got[0].BaseURL != "https://a/x/" {
+		t.Fatal(got, err)
+	}
+}
+
+func TestFetchErrorsRedactURL(t *testing.T) {
+	srv := httptest.NewServer(http.NotFoundHandler())
+	u := "http://user:pass@" + srv.Listener.Addr().String() + "/m?token=SECRET"
+	_, err := ResolveMetalink(context.Background(), srv.Client(), u)
+	if err == nil || strings.Contains(err.Error(), "SECRET") || strings.Contains(err.Error(), "pass") {
+		t.Fatalf("non-200: %v", err)
+	}
+	srv.Close()
+	for _, f := range []func() error{
+		func() error { _, e := ResolveMetalink(context.Background(), srv.Client(), u); return e },
+		func() error { _, e := ResolveMirrorList(context.Background(), srv.Client(), u); return e },
+	} {
+		if err := f(); err == nil || strings.Contains(err.Error(), "SECRET") || strings.Contains(err.Error(), "pass") {
+			t.Fatalf("conn error: %v", err)
+		}
+	}
+}
+
+func TestResolveMetalinkHTTPOnly(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		fmt.Fprint(w, `<?xml version="1.0" encoding="utf-8"?>
+<metalink version="3.0" xmlns="http://www.metalinker.org/" xmlns:mm0="http://fedoraproject.org/metalink/ns">
+<files><file name="repomd.xml"><mm0:timestamp>1700000000</mm0:timestamp><resources maxconnections="1">
+<url protocol="rsync" type="rsync">rsync://r.example/fedora/repodata/repomd.xml</url>
+<url protocol="https" type="https">https://m1.example/os/repodata/repomd.xml</url>
+</resources></file></files></metalink>`)
+	}))
+	defer srv.Close()
+	got, err := ResolveMetalink(context.Background(), srv.Client(), srv.URL)
+	if err != nil || got != "https://m1.example/os/" {
+		t.Fatal(got, err)
+	}
+}
+
+func TestResolveMirrorListHTTPOnly(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		fmt.Fprint(w, "rsync://x/\nftp://y/\nhttps://ok/os/\n")
+	}))
+	defer srv.Close()
+	got, err := ResolveMirrorList(context.Background(), srv.Client(), srv.URL)
+	if err != nil || got != "https://ok/os/" {
 		t.Fatal(got, err)
 	}
 }
