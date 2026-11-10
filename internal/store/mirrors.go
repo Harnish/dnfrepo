@@ -137,12 +137,13 @@ func (s *Store) ClaimMirror(ctx context.Context, repoID int64) error {
 	return ErrBusy
 }
 
-// ClaimDueMirror atomically claims one idle, unpaused mirror whose next_run is due; nil if none.
+// ClaimDueMirror atomically claims one idle, unpaused, scheduled (non-manual) mirror whose
+// next_run is due or missing (a lost next_run self-heals by running now); nil if none.
 func (s *Store) ClaimDueMirror(ctx context.Context, now time.Time) (*Mirror, error) {
 	m, err := scanMirror(s.pool.QueryRow(ctx, `
 		UPDATE mirrors SET state='running' WHERE repo_id=(
-			SELECT repo_id FROM mirrors WHERE state='idle' AND NOT paused AND next_run IS NOT NULL AND next_run<=$1
-			ORDER BY next_run LIMIT 1 FOR UPDATE SKIP LOCKED)
+			SELECT repo_id FROM mirrors WHERE state='idle' AND NOT paused AND frequency<>'manual' AND (next_run IS NULL OR next_run<=$1)
+			ORDER BY next_run NULLS FIRST LIMIT 1 FOR UPDATE SKIP LOCKED)
 		RETURNING `+mirrorCols, now))
 	if errors.Is(err, ErrNotFound) {
 		return nil, nil

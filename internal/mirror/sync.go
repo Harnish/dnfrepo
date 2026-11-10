@@ -38,7 +38,8 @@ type Syncer struct {
 	Timeout     time.Duration // per sync, applied by Trigger and the scheduler; default 6h
 	Tick        time.Duration // scheduler poll interval; default 1 minute
 
-	wg sync.WaitGroup // sync goroutines and the scheduler loop
+	wg        sync.WaitGroup // sync goroutines and the scheduler loop
+	startOnce sync.Once
 }
 
 // Result.Status is "synced" or "up to date".

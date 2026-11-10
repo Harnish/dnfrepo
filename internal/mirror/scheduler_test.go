@@ -194,3 +194,27 @@ func TestRunStoresNextRun(t *testing.T) {
 		t.Fatalf("next run %v want %v", m.NextRun, want)
 	}
 }
+
+func TestBadScheduleKeepsMirrorScheduled(t *testing.T) {
+	// a schedule NextRun cannot use must not null next_run, or the mirror never runs again
+	e := newSyncEnv(t, fakeOpts{}, func(m *store.Mirror) {
+		daily(nil)(m)
+		m.Schedule.Timezone = "Mars/Olympus"
+	})
+	if _, err := e.run(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if m := e.mirror(); m.NextRun == nil || !m.NextRun.After(time.Now()) {
+		t.Fatalf("next run %v", m.NextRun)
+	}
+}
+
+func TestManualMirrorHasNoNextRun(t *testing.T) {
+	e := newSyncEnv(t, fakeOpts{}, nil)
+	if _, err := e.run(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if m := e.mirror(); m.NextRun != nil {
+		t.Fatalf("next run %v", m.NextRun)
+	}
+}

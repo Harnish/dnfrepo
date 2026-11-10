@@ -121,20 +121,31 @@ func TestClaimDueMirrorSkipsPausedAndFuture(t *testing.T) {
 	ctx := context.Background()
 	now := time.Now()
 	past, future := now.Add(-time.Minute), now.Add(time.Hour)
-	mk := func(slug string, next *time.Time, paused bool) int64 {
+	mkf := func(slug, freq string, next *time.Time, paused bool) int64 {
 		r := mustRepo(t, s, slug, nil)
-		if err := s.SetMirror(ctx, store.Mirror{RepoID: r.ID, UpstreamURL: "u", NextRun: next, Schedule: store.Schedule{Frequency: "daily", Paused: paused}}); err != nil {
+		if err := s.SetMirror(ctx, store.Mirror{RepoID: r.ID, UpstreamURL: "u", NextRun: next, Schedule: store.Schedule{Frequency: freq, Paused: paused}}); err != nil {
 			t.Fatal(err)
 		}
 		return r.ID
 	}
+	mk := func(slug string, next *time.Time, paused bool) int64 { return mkf(slug, "daily", next, paused) }
 	mk("paused", &past, true)
 	mk("future", &future, false)
-	mk("never", nil, false)
+	mkf("manual", "manual", &past, false)
+	mkf("manualnil", "manual", nil, false)
+	mk("pausednil", nil, true)
 	due := mk("due", &past, false)
 	m, err := s.ClaimDueMirror(ctx, now)
 	if err != nil || m == nil || m.RepoID != due || m.State != "running" {
 		t.Fatalf("got %+v, %v", m, err)
+	}
+	if m, err := s.ClaimDueMirror(ctx, now); err != nil || m != nil {
+		t.Fatalf("second claim: %+v, %v", m, err)
+	}
+	// a scheduled mirror that lost its next_run self-heals: it is due now
+	heal := mk("nonext", nil, false)
+	if m, err := s.ClaimDueMirror(ctx, now); err != nil || m == nil || m.RepoID != heal {
+		t.Fatalf("null next_run: %+v, %v", m, err)
 	}
 	if m, err := s.ClaimDueMirror(ctx, now); err != nil || m != nil {
 		t.Fatalf("second claim: %+v, %v", m, err)

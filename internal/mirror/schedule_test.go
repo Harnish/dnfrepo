@@ -163,6 +163,7 @@ func TestValidateScheduleRejects(t *testing.T) {
 	bad := []store.Schedule{
 		{Frequency: "hourly", TimeOfDay: "00:00", Timezone: "UTC"},
 		{Frequency: "daily", TimeOfDay: "00:00", Timezone: "Mars/Olympus"},
+		{Frequency: "daily", TimeOfDay: "00:00", Timezone: ""},
 		{Frequency: "daily", TimeOfDay: "25:00", Timezone: "UTC"},
 		{Frequency: "daily", TimeOfDay: "12:60", Timezone: "UTC"},
 		{Frequency: "daily", TimeOfDay: "", Timezone: "UTC"},

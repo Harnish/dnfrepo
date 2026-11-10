@@ -10,6 +10,7 @@ import (
 const (
 	defaultTimeout = 6 * time.Hour
 	defaultTick    = time.Minute
+	fallbackRetry  = time.Hour
 )
 
 // Trigger claims the mirror (store.ErrBusy if a sync is running, store.ErrNotFound
@@ -24,8 +25,12 @@ func (s *Syncer) Trigger(ctx context.Context, repoID int64, actor string) error 
 }
 
 // Start resets runs orphaned by a restart, then claims and starts due mirrors
-// now and every Tick until ctx is done. It does not block.
+// now and every Tick until ctx is done. It does not block; later calls do nothing.
 func (s *Syncer) Start(ctx context.Context) {
+	s.startOnce.Do(func() { s.start(ctx) })
+}
+
+func (s *Syncer) start(ctx context.Context) {
 	if n, err := s.Store.InterruptRunning(ctx); err != nil {
 		log.Printf("mirror: reset interrupted syncs: %v", err)
 	} else if n > 0 {
@@ -57,7 +62,9 @@ func (s *Syncer) claimDue(ctx context.Context) {
 	for ctx.Err() == nil {
 		m, err := s.Store.ClaimDueMirror(ctx, time.Now())
 		if err != nil {
-			log.Printf("mirror: claim due: %v", err)
+			if ctx.Err() == nil {
+				log.Printf("mirror: claim due: %v", err)
+			}
 			return
 		}
 		if m == nil {
@@ -109,15 +116,24 @@ func (s *Syncer) auditFailed(ctx context.Context, repoID int64, actor, msg strin
 	}
 }
 
-// nextRun is the mirror's next scheduled run from now, nil for manual or on error.
+// nextRun is the mirror's next scheduled run from now, nil only for a manual
+// mirror. When the schedule cannot be read or used it falls back to an hour
+// from now, so a scheduled mirror never silently stops (manual mirrors are
+// never claimed by schedule, so the fallback is harmless for them).
 func (s *Syncer) nextRun(ctx context.Context, repoID int64) *time.Time {
 	m, err := s.Store.MirrorByRepo(ctx, repoID)
-	if err != nil {
-		return nil
+	for i := 1; err != nil && i < 3 && ctx.Err() == nil; i++ {
+		time.Sleep(time.Duration(i) * 200 * time.Millisecond)
+		m, err = s.Store.MirrorByRepo(ctx, repoID)
 	}
-	n, err := NextRun(m.Schedule, time.Now())
-	if err != nil {
-		log.Printf("mirror: repo %d: schedule: %v", repoID, err)
+	if err == nil {
+		n, nerr := NextRun(m.Schedule, time.Now())
+		if nerr == nil {
+			return n
+		}
+		err = nerr
 	}
-	return n
+	log.Printf("mirror: repo %d: next run: %v; retrying in %v", repoID, err, fallbackRetry)
+	t := time.Now().Add(fallbackRetry)
+	return &t
 }

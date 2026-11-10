@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"slices"
 	"time"
+	_ "time/tzdata" // the runtime image (fedora-minimal) may lack /usr/share/zoneinfo
 
 	"dnfrepo/internal/store"
 )
@@ -22,7 +23,7 @@ func ValidateSchedule(sc store.Schedule) error {
 	if _, _, err := parseHHMM(sc.TimeOfDay); err != nil {
 		return err
 	}
-	if _, err := time.LoadLocation(sc.Timezone); err != nil {
+	if _, err := time.LoadLocation(sc.Timezone); err != nil || sc.Timezone == "" {
 		return fmt.Errorf("unknown timezone %q", sc.Timezone)
 	}
 	switch sc.Frequency {
