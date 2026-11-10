@@ -14,6 +14,7 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"golang.org/x/sync/errgroup"
@@ -34,7 +35,10 @@ type Syncer struct {
 	StagingDir  string
 	Concurrency int           // parallel downloads; default 4
 	MaxRPMBytes int64         // per-rpm cap; default 4 GiB
-	Timeout     time.Duration // applied by the caller; default 6h
+	Timeout     time.Duration // per sync, applied by Trigger and the scheduler; default 6h
+	Tick        time.Duration // scheduler poll interval; default 1 minute
+
+	wg sync.WaitGroup // sync goroutines and the scheduler loop
 }
 
 // Result.Status is "synced" or "up to date".
@@ -98,7 +102,7 @@ func (s *Syncer) Run(ctx context.Context, repoID int64, actor string) (Result, e
 			err = ferr
 		}
 	}
-	if ferr := s.Store.FinishMirror(bctx, repoID, status, msg, nil); ferr != nil && err == nil {
+	if ferr := s.Store.FinishMirror(bctx, repoID, status, msg, s.nextRun(bctx, repoID)); ferr != nil && err == nil {
 		err = ferr
 	}
 	if err != nil && !committed {
