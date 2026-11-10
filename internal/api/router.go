@@ -16,6 +16,7 @@ type Deps struct {
 	RepoUsers *RepoUsers
 	Packages  *Packages
 	Sources   *Sources
+	Mirrors   *Mirrors
 	Serve     http.Handler // serve.Handler: /r/... and /gpg.key
 	Static    fs.FS        // built React app (index.html at root)
 }
@@ -41,6 +42,7 @@ func Router(d Deps) http.Handler {
 	d.Packages.RoutesAudit(admin)
 	d.Packages.RoutesKeep(admin)
 	d.Sources.Routes(admin)
+	d.Mirrors.Routes(admin)
 	top.Handle("/api/", d.Admin.RequireAdmin(adminauth.CSRF(admin)))
 
 	top.Handle("GET /r/", d.Serve)

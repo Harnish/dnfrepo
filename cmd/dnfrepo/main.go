@@ -14,8 +14,10 @@ import (
 	"dnfrepo/internal/adminauth"
 	"dnfrepo/internal/api"
 	"dnfrepo/internal/config"
+	"dnfrepo/internal/mirror"
 	"dnfrepo/internal/pipeline"
 	"dnfrepo/internal/publish"
+	"dnfrepo/internal/secretbox"
 	"dnfrepo/internal/serve"
 	"dnfrepo/internal/signer"
 	"dnfrepo/internal/sources"
@@ -72,6 +74,16 @@ func main() {
 	sch := &sources.Scheduler{Store: st, Pipeline: pl, GitHubToken: cfg.GitHubToken}
 	sch.Start(ctx)
 
+	var box *secretbox.Box // nil without SECRET_KEY: mirrors then cannot store credentials
+	if cfg.SecretKey != "" {
+		if box, err = secretbox.New(cfg.SecretKey); err != nil {
+			log.Fatal(err)
+		}
+	}
+	// staging sits under DATA_DIR (same filesystem as the repos, so ingest can hardlink) but outside repos/
+	syncer := &mirror.Syncer{Store: st, Pipeline: pl, Box: box, StagingDir: filepath.Join(cfg.DataDir, "mirror-staging")}
+	syncer.Start(ctx)
+
 	actor := func(r *http.Request) string { e, _ := admin.Authenticate(r); return e }
 	handler := api.Router(api.Deps{
 		Admin:     admin,
@@ -79,6 +91,7 @@ func main() {
 		RepoUsers: &api.RepoUsers{Store: st},
 		Packages:  &api.Packages{Pipeline: pl, Actor: actor},
 		Sources:   &api.Sources{Store: st, Scheduler: sch},
+		Mirrors:   &api.Mirrors{Store: st, Syncer: syncer, Box: box, Actor: actor},
 		Serve: serve.Handler(serve.Deps{Store: st, RepoDir: pub.RepoDir, PublicKey: sg.PublicKeyArmored(),
 			BaseURL: cfg.BaseURL, Trusted: cfg.TrustedProxies}),
 		Static: web.Dist(),

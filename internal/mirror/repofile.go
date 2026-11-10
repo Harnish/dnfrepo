@@ -241,3 +241,12 @@ func ResolveMirrorList(ctx context.Context, c *http.Client, listURL string) (str
 	}
 	return "", errors.New("mirrorlist is empty")
 }
+
+// FetchKey downloads an armored public key (a .repo gpgkey) from an http(s) URL.
+func FetchKey(ctx context.Context, c *http.Client, keyURL string) (string, error) {
+	if !isHTTP(keyURL) {
+		return "", errors.New("gpg key url must be http or https")
+	}
+	b, err := fetch(ctx, c, keyURL)
+	return string(b), err
+}

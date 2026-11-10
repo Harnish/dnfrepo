@@ -205,3 +205,27 @@ func TestAddPackageFirstStageRefusesMirrorRepo(t *testing.T) {
 		t.Fatalf("mirror path must still work: %v", err)
 	}
 }
+
+func TestDeleteMirrorRefusesWhileRunning(t *testing.T) {
+	s := storetest.New(t)
+	ctx := context.Background()
+	r := mustRepo(t, s, "m", nil)
+	if err := s.SetMirror(ctx, store.Mirror{RepoID: r.ID, UpstreamURL: "u"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.ClaimMirror(ctx, r.ID); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.DeleteMirror(ctx, r.ID); !errors.Is(err, store.ErrBusy) {
+		t.Fatalf("want ErrBusy, got %v", err)
+	}
+	if err := s.FinishMirror(ctx, r.ID, "synced", "", nil); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.DeleteMirror(ctx, r.ID); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.DeleteMirror(ctx, r.ID); !errors.Is(err, store.ErrNotFound) {
+		t.Fatalf("want ErrNotFound, got %v", err)
+	}
+}

@@ -13,6 +13,7 @@ import (
 
 	"dnfrepo/internal/adminauth"
 	"dnfrepo/internal/config"
+	"dnfrepo/internal/mirror"
 	"dnfrepo/internal/pipeline"
 	"dnfrepo/internal/serve"
 	"dnfrepo/internal/sources"
@@ -31,6 +32,7 @@ func routerEnv(t *testing.T) (*env, http.Handler, string) {
 		RepoUsers: &RepoUsers{Store: e.St},
 		Packages:  &Packages{Pipeline: pl, Actor: actor},
 		Sources:   &Sources{Store: e.St, Scheduler: &sources.Scheduler{Store: e.St, Pipeline: pl}},
+		Mirrors:   &Mirrors{Store: e.St, Syncer: &mirror.Syncer{Store: e.St, Pipeline: pl}, Actor: actor},
 		Serve: serve.Handler(serve.Deps{Store: e.St, RepoDir: func(s string) string { return filepath.Join(dir, "repos", s) },
 			PublicKey: "KEY", BaseURL: "http://x", Trusted: []netip.Prefix{}}),
 		Static: fstest.MapFS{
@@ -65,6 +67,8 @@ var adminRoutes = []struct{ method, path string }{
 	{"DELETE", "/api/repos/dev/packages/x.rpm"}, {"POST", "/api/repos/dev/promote"}, {"GET", "/api/repos/dev/audit"}, {"PUT", "/api/repos/dev/keep"},
 	{"GET", "/api/repos/dev/sources"}, {"POST", "/api/repos/dev/sources"},
 	{"DELETE", "/api/sources/1"}, {"POST", "/api/sources/1/run"},
+	{"POST", "/api/mirror/parse-repo"}, {"GET", "/api/repos/dev/mirror"}, {"PUT", "/api/repos/dev/mirror"},
+	{"DELETE", "/api/repos/dev/mirror"}, {"POST", "/api/repos/dev/mirror/sync"}, {"GET", "/api/repos/dev/batches"},
 }
 
 func TestAdminRoutesRequireSessionAndCSRFHeader(t *testing.T) {
@@ -142,7 +146,7 @@ func TestSPAFallback(t *testing.T) {
 
 func TestLocalLoginEndpointsArePublic(t *testing.T) {
 	svc := adminauth.New(storetest.New(t), config.Config{BaseURL: "http://x", AdminEmail: "a@b.c", AdminPassword: "pw"}, fakeIDP)
-	h := Router(Deps{Admin: svc, Repos: &Repos{}, RepoUsers: &RepoUsers{}, Packages: &Packages{}, Sources: &Sources{}, Serve: http.NotFoundHandler(),
+	h := Router(Deps{Admin: svc, Repos: &Repos{}, RepoUsers: &RepoUsers{}, Packages: &Packages{}, Sources: &Sources{}, Mirrors: &Mirrors{}, Serve: http.NotFoundHandler(),
 		Static: fstest.MapFS{"index.html": {Data: []byte("SPA")}}})
 	r := httptest.NewRequest("GET", "/api/auth/methods", nil)
 	if w := httptest.NewRecorder(); func() bool {

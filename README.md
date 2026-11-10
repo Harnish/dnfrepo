@@ -78,7 +78,8 @@ Scripts authenticate with an admin API token (`Authorization: Bearer dnfr_...`, 
 | `GET/POST /api/auth/tokens`, `DELETE /api/auth/tokens/{id}` | admin API tokens (browser session only) |
 | `GET/POST /api/repos`, `GET/PATCH/DELETE /api/repos/{slug}`, `PUT .../ips`, `PUT .../previous`, `GET/PUT .../users` | repos, pipeline links, access |
 | `GET/POST /api/repos/{slug}/packages` (multipart `file`), `DELETE .../packages/{filename}` | packages |
-| `POST /api/repos/{slug}/promote` `{"filenames":["foo-1.rpm","bar-2.rpm"]}` | promote to the next stage |
+| `POST /api/repos/{slug}/promote` `{"filenames":["foo-1.rpm","bar-2.rpm"]}` or `{"batch":12}` | promote to the next stage |
+| `POST /api/mirror/parse-repo`, `GET/PUT/DELETE /api/repos/{slug}/mirror`, `POST .../mirror/sync`, `GET .../batches` | mirror repos (see docs/api.md) |
 | `GET/POST /api/repos/{slug}/sources`, `DELETE /api/sources/{id}`, `POST /api/sources/{id}/run` | sources |
 | `GET/POST /api/repo-users`, `DELETE /api/repo-users/{id}` | repo users and tokens |
 | `PUT /api/repos/{slug}/keep` `{"keep":3,"overrides":{"plexmediaserver":10}}` | set retention limits and purge now (returns the purged filenames) |

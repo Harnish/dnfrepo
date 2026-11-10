@@ -77,6 +77,53 @@ curl -fsS -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' 
 | 404 | repo or a named file not found |
 | 409 | repo has no next stage, or the next stage already has a *different* file with that name (nothing is promoted) |
 
+**By batch**: send `{"batch":12}` instead of `filenames` to promote every package in `{slug}` that came from sync batch 12 (promoted packages keep their batch, so the same id works in later stages). Give exactly one of the two (`400` otherwise); `404` if the batch has no packages in this repo.
+
+A mirror repo refuses uploads and sources (`409`), and cannot be linked behind another repo (`409`).
+
+## Mirrors
+
+A mirror is an empty first-stage repo that syncs from an upstream dnf repo. Credentials are write-only: the token is stored encrypted (needs `SECRET_KEY`) and never returned. Keep tokens out of shell history, e.g. build the body with `jq` from an env var.
+
+### Parse a .repo file: `POST /api/mirror/parse-repo`
+
+```
+jq -n --rawfile f fedora.repo '{repo_file:$f}' |
+  curl -fsS -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' -d @- "$BASE/api/mirror/parse-repo"
+```
+
+`200 {"sections":[{"id":"fedora","name":"Fedora $releasever","url_kind":"metalink","variables":["basearch","releasever"],"has_credentials":false}]}`. `400` if no section has a baseurl/metalink/mirrorlist.
+
+### Configure: `PUT /api/repos/{slug}/mirror`
+
+Body: `upstream_url` **or** `repo_file` (+ `section` when it has several, `vars` for its `$variables`), and optionally `username`, `token`, `clear_credentials`, `gpg_key` (armored), `require_signature`, `arches`, `include`, `exclude` (globs on package name), `keep_latest` (0 = all), `schedule` `{frequency: manual|daily|weekly|monthly, time_of_day:"HH:MM", timezone, weekdays:[0-6, 0=Sunday], day_of_month, paused}`.
+
+```
+jq -n --arg tok "$UPSTREAM_TOKEN" '{upstream_url:"https://pkgs.example.org/el9/x86_64/", username:"ci", token:$tok,
+  arches:["x86_64","noarch"], schedule:{frequency:"daily", time_of_day:"03:00", timezone:"UTC"}}' |
+  curl -fsS -X PUT -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' -d @- "$BASE/api/repos/el9/mirror"
+```
+
+- Variables are substituted and a metalink/mirrorlist is resolved to its first URL now; the resolved URL is stored. From a `.repo` file an http(s) `gpgkey` is fetched and `repo_gpgcheck=1` sets `require_signature`; `username`/`password` become the credentials.
+- Omitting `token` keeps the stored one; `clear_credentials:true` removes username and token.
+- `200`: the config (as GET). `400`: bad URL or schedule, `{"error","missing_vars":[...]}`, `{"error","sections":[ids]}` when a section must be chosen, credentials without `SECRET_KEY`, `require_signature` without a key. `409`: repo has packages or sources, or is a later stage.
+
+### Read / remove: `GET`, `DELETE /api/repos/{slug}/mirror`
+
+`GET` returns the config plus `state` (`idle`/`running`), `last_run`, `last_status`, `last_error`, `next_run`, `has_credentials`; `username` is shown, the token never. `DELETE` turns the repo back into a normal first stage, keeping its packages (`409` while a sync runs). Both `404` if the repo is not a mirror.
+
+### Sync now: `POST /api/repos/{slug}/mirror/sync`
+
+```
+curl -fsS -X POST -H "Authorization: Bearer $TOKEN" "$BASE/api/repos/el9/mirror/sync"
+```
+
+`202 {"status":"started"}`; poll `GET .../mirror` for the result. `409` if a sync is running, `404` if not a mirror. Sync writes are audited as `mirror:<slug>`; the request itself as `sync-requested` by the caller.
+
+### Batches: `GET /api/repos/{slug}/batches`
+
+`200 [{"id":12,"started_at":"…","finished_at":"…","status":"synced","added":40,"error":""}]`, newest first (at most 100).
+
 ## Tokens (browser session only)
 
 | | |

@@ -83,6 +83,10 @@ func (a *Sources) Routes(mux *http.ServeMux) {
 			return
 		}
 		s, err := a.Store.AddSource(r.Context(), repo.ID, in.Kind, in.Spec)
+		if errors.Is(err, store.ErrMirrorRepo) {
+			errJSON(w, 409, "a mirror repo cannot have sources")
+			return
+		}
 		if err != nil {
 			errJSON(w, 500, "internal error")
 			return

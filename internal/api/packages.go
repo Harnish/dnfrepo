@@ -20,7 +20,7 @@ func pkgErr(w http.ResponseWriter, err error) {
 	switch {
 	case errors.Is(err, store.ErrNotFound):
 		errJSON(w, 404, "not found")
-	case errors.Is(err, pipeline.ErrNotFirstStage), errors.Is(err, pipeline.ErrExists):
+	case errors.Is(err, pipeline.ErrNotFirstStage), errors.Is(err, pipeline.ErrExists), errors.Is(err, store.ErrMirrorRepo):
 		errJSON(w, 409, err.Error())
 	case errors.Is(err, pipeline.ErrBadFilename), errors.Is(err, rpmmeta.ErrNotRPM):
 		errJSON(w, 400, err.Error())
@@ -105,11 +105,28 @@ func (a *Packages) Routes(mux *http.ServeMux) {
 // RoutesPromote registers POST /api/repos/{slug}/promote.
 func (a *Packages) RoutesPromote(mux *http.ServeMux) {
 	mux.HandleFunc("POST /api/repos/{slug}/promote", func(w http.ResponseWriter, r *http.Request) {
-		var in struct{ Filenames []string }
+		var in struct {
+			Filenames []string
+			Batch     *int64 // alternative to filenames: every package in this repo from that sync batch
+		}
 		if !decode(w, r, &in) {
 			return
 		}
-		res, err := a.Pipeline.Promote(r.Context(), r.PathValue("slug"), in.Filenames, a.Actor(r))
+		var res pipeline.PromoteResult
+		var err error
+		switch {
+		case in.Batch != nil && in.Filenames != nil:
+			errJSON(w, 400, "give filenames or batch, not both")
+			return
+		case in.Batch != nil:
+			res, err = a.Pipeline.PromoteBatch(r.Context(), r.PathValue("slug"), *in.Batch, a.Actor(r))
+			if errors.Is(err, pipeline.ErrEmptyPromotion) {
+				errJSON(w, 404, "batch has no packages in this repo")
+				return
+			}
+		default:
+			res, err = a.Pipeline.Promote(r.Context(), r.PathValue("slug"), in.Filenames, a.Actor(r))
+		}
 		switch {
 		case errors.Is(err, pipeline.ErrNoNextStage), errors.Is(err, pipeline.ErrConflict):
 			errJSON(w, 409, err.Error())
