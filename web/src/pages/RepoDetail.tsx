@@ -1,5 +1,6 @@
 import { FormEvent, useCallback, useEffect, useState } from 'react'
 import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom'
+import { nextMirrorFor } from '../mirrorState'
 import MirrorPanel from './MirrorPanel'
 import { api, ApiError, AuditEvent, fmtSize, Mode, Pkg, Repo, RepoUser, Source } from '../api'
 
@@ -19,13 +20,14 @@ export default function RepoDetail() {
   const [err, setErr] = useState('')
   const [msg, setMsg] = useState('')
   const [src, setSrc] = useState({ kind: 'github', spec: '' })
-  const [isMirror, setIsMirror] = useState(false)
+  const [mirrorFor, setMirrorFor] = useState<string | null>(null)
   const [keep, setKeep] = useState(0)
   const [rules, setRules] = useState<{ name: string; keep: number }[]>([])
 
   const repo = repos.find((r) => r.slug === slug)
   const next = repos.find((r) => r.previous === slug)
   const first = repo ? !repo.previous : false
+  const isMirror = mirrorFor === slug && first
 
   const run = async (f: () => Promise<unknown>, ok = '') => {
     setErr(''); setMsg('')
@@ -43,11 +45,12 @@ export default function RepoDetail() {
     setRules(Object.entries(r.keep_overrides ?? {}).map(([name, k]) => ({ name, keep: k })))
     const [p, a] = await Promise.all([api.packages(slug), api.audit(slug)])
     setPkgs(p); setAudit(a); setSelected(new Set())
+    if (r.previous) setMirrorFor(null)
     if (!r.previous) {
       setSources(await api.sources(slug))
       // 404 = not a mirror; a freshly created "mirror" repo (?mirror=1) shows the empty form
       const m = await api.mirror(slug).then(() => true, (x) => { if (x instanceof ApiError && x.status === 404) return false; throw x })
-      setIsMirror((was) => was || m || params.get('mirror') === '1')
+      setMirrorFor((was) => nextMirrorFor(was, slug, true, m, params.get('mirror') === '1'))
     }
     if (r.mode === 'users') {
       setUsers(await api.repoUsers())
@@ -200,7 +203,7 @@ export default function RepoDetail() {
 
       {isMirror && <MirrorPanel slug={slug} next={next?.name} onChanged={load} />}
       {first && !isMirror && pkgs.length === 0 && sources.length === 0 && (
-        <p><button onClick={() => setIsMirror(true)}>Make this a mirror</button></p>
+        <p><button onClick={() => setMirrorFor(slug)}>Make this a mirror</button></p>
       )}
 
       <h2>Pipeline</h2>

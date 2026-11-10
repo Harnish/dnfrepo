@@ -4,6 +4,7 @@ import { dayName, describeSchedule } from '../schedule'
 
 const browserTZ = () => { try { return Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC' } catch { return 'UTC' } }
 const zones = (): string[] => { try { return (Intl as unknown as { supportedValuesOf?: (k: string) => string[] }).supportedValuesOf?.('timeZone') ?? [] } catch { return [] } }
+const fmt = (t: string | null) => (t ? new Date(t).toLocaleString() : '')
 const lines = (s: string) => s.split(/[\s,]+/).filter(Boolean)
 const defaultSchedule = (): MirrorSchedule => ({ frequency: 'manual', time_of_day: '02:00', timezone: browserTZ(), weekdays: [], day_of_month: 1, paused: false })
 
@@ -57,9 +58,12 @@ export default function MirrorPanel({ slug, next, onChanged }: { slug: string; n
   const running = m?.state === 'running'
   useEffect(() => {
     if (!running) return
-    const t = setInterval(() => { status().catch(() => {}); onChanged() }, 5000)
+    // light poll: only the mirror status; batches and the page reload once when the sync finishes
+    const t = setInterval(() => {
+      api.mirror(slug).then((c) => { setM(c); if (c.state !== 'running') { api.batches(slug).then(setBatches); onChanged() } }).catch(() => {})
+    }, 5000)
     return () => clearInterval(t)
-  }, [running, status, onChanged])
+  }, [running, slug, onChanged])
 
   // variables to prompt for: those of the parsed section plus any the server reported missing
   const shownVars = [...new Set([...(sections.find((s) => s.id === section)?.variables ?? []), ...varNames])]
@@ -76,6 +80,7 @@ export default function MirrorPanel({ slug, next, onChanged }: { slug: string; n
   async function save(ev: FormEvent) {
     ev.preventDefault()
     setErr(''); setMsg('')
+    if (sched.frequency === 'weekly' && sched.weekdays.length === 0) { setErr('Pick at least one weekday for a weekly schedule'); return }
     const body: MirrorInput = {
       gpg_key: gpg, require_signature: reqSig, arches: lines(arches), include: lines(include), exclude: lines(exclude),
       keep_latest: keepLatest, schedule: sched,
@@ -87,7 +92,7 @@ export default function MirrorPanel({ slug, next, onChanged }: { slug: string; n
       const used = shownVars.filter((n) => vars[n] !== undefined && vars[n] !== '')
       if (used.length) body.vars = Object.fromEntries(used.map((n) => [n, vars[n]]))
     }
-    if (user) body.username = user
+    if (user !== (m?.username ?? '')) body.username = user // "" clears it; unchanged keeps
     if (token) body.token = token // write-only: blank keeps the stored one
     if (clearCreds) body.clear_credentials = true
     try {
@@ -145,7 +150,7 @@ export default function MirrorPanel({ slug, next, onChanged }: { slug: string; n
             Status: <strong>{m.state === 'running' ? 'syncing…' : m.last_status || 'never synced'}</strong>
             {m.last_error && <span className="error"> {m.last_error}</span>}
           </p>
-          <p className="muted">Last run: {m.last_run ?? 'never'} · Next run: {m.next_run ?? 'none'} · {describeSchedule(m.schedule)}</p>
+          <p className="muted">Last run: {fmt(m.last_run) || 'never'} · Next run: {fmt(m.next_run) || 'none'} · {describeSchedule(m.schedule)}</p>
           <div className="row">
             <button className="primary" onClick={sync} disabled={running}>Sync now</button>
             <button onClick={remove} disabled={running}>Stop mirroring</button>
@@ -243,7 +248,7 @@ export default function MirrorPanel({ slug, next, onChanged }: { slug: string; n
         <tbody>
           {batches.map((b) => (
             <tr key={b.id}>
-              <td>{b.id}</td><td>{b.started_at}</td><td>{b.status}</td><td>{b.added}</td><td className="error">{b.error}</td>
+              <td>{b.id}</td><td>{fmt(b.started_at)}</td><td>{b.status}</td><td>{b.added}</td><td className="error">{b.error}</td>
               <td><button disabled={!next} title={next ? '' : 'This repo has no next stage'} onClick={() => promote(b)}>Promote batch → {next ?? 'next stage'}</button></td>
             </tr>
           ))}
