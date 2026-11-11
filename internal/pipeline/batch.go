@@ -68,12 +68,14 @@ func (s *Service) IngestBatch(ctx context.Context, slug string, batchID int64, f
 			cleanup()
 			return nil, err
 		}
-		if err := linkOrCopy(f.Path, final); err != nil { // never overwrites: Link and O_EXCL fail on an existing name
-			cleanup()
-			if os.IsExist(err) {
-				return nil, fmt.Errorf("%w: %s", ErrExists, f.Filename)
+		if !s.linkDup(ctx, f.SHA256, f.Size, final) {
+			if err := linkOrCopy(f.Path, final); err != nil { // never overwrites: Link and O_EXCL fail on an existing name
+				cleanup()
+				if os.IsExist(err) {
+					return nil, fmt.Errorf("%w: %s", ErrExists, f.Filename)
+				}
+				return nil, err
 			}
-			return nil, err
 		}
 		placed = append(placed, final)
 	}

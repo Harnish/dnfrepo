@@ -50,6 +50,7 @@ Admin sign-in limits to know about:
 | `MIRROR_MAX_RPM_BYTES` | 4 GiB | Per-rpm limit for mirror downloads |
 | `SECRET_KEY` | empty | Seals mirror upstream credentials (username/token) in the database. Needed only when a mirror uses credentials. If you remove or change it later, stored credentials can no longer be decrypted: clear them and enter them again |
 | `REBUILD_TIMEOUT` | `10m` | Cap for one metadata rebuild (Go duration, e.g. `30m`); raise it for very large mirrors |
+| `DEDUP` | `false` | When `true`, a newly uploaded, mirrored or source-fetched rpm is hardlinked to an identical existing file (same sha256 and size) instead of stored again. Needs repos on one filesystem; otherwise it keeps a normal copy. Promotion always hardlinks. Existing duplicates: `POST /api/dedup` |
 
 TLS is not handled by the app: put it behind a reverse proxy (and set `TRUSTED_PROXIES`). Use HTTPS for `users`-mode repos, since Basic auth sends the token on every request.
 

@@ -41,6 +41,7 @@ func Router(d Deps) http.Handler {
 	d.Packages.RoutesPromote(admin)
 	d.Packages.RoutesAudit(admin)
 	d.Packages.RoutesKeep(admin)
+	d.Packages.RoutesDedup(admin)
 	d.Sources.Routes(admin)
 	d.Mirrors.Routes(admin)
 	top.Handle("/api/", d.Admin.RequireAdmin(adminauth.CSRF(admin)))

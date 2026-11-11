@@ -124,6 +124,12 @@ curl -fsS -X POST -H "Authorization: Bearer $TOKEN" "$BASE/api/repos/el9/mirror/
 
 `200 [{"id":12,"started_at":"…","finished_at":"…","status":"synced","added":40,"error":""}]`, newest first (at most 100). Lists the repo's own sync batches and, in later stages, the batches its packages were promoted from; for those, `added` is how many of the batch's packages are in this repo. `origin_batch_id` on a package names its batch.
 
+## Dedup
+
+### Sweep: `POST /api/dedup`
+
+Replaces identical rpm files (same sha256 and size) across all repos with hardlinks to one copy. Both files are re-hashed from disk first; the swap is an atomic rename, so readers never see a missing file. `200 {"linked":3,"bytes_saved":18219,"skipped":0}`. `skipped` counts duplicates left alone (file missing, content mismatch, or on another filesystem). No metadata rebuild is needed. Each affected repo gets a `deduped` audit event. Works whether or not `DEDUP` is set.
+
 ## Tokens (browser session only)
 
 | | |

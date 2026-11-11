@@ -168,7 +168,19 @@ func (a *Packages) RoutesAudit(mux *http.ServeMux) {
 	})
 }
 
-var pkgNameRe = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._+-]*$`)
+// RoutesDedup registers POST /api/dedup: hardlink identical rpm files across all repos.
+func (a *Packages) RoutesDedup(mux *http.ServeMux) {
+	mux.HandleFunc("POST /api/dedup", func(w http.ResponseWriter, r *http.Request) {
+		res, err := a.Pipeline.DedupSweep(r.Context(), a.Actor(r))
+		if err != nil {
+			pkgErr(w, err)
+			return
+		}
+		writeJSON(w, 200, map[string]any{"linked": res.Linked, "bytes_saved": res.BytesSaved, "skipped": res.Skipped})
+	})
+}
+
+var pkgNameRe =regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._+-]*$`)
 
 // RoutesKeep registers PUT /api/repos/{slug}/keep: set the repo's retention limits and apply them now.
 func (a *Packages) RoutesKeep(mux *http.ServeMux) {

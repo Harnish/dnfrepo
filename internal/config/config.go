@@ -20,6 +20,7 @@ type Config struct {
 	MirrorMaxRPMBytes                         int64         // per mirrored rpm
 	SecretKey                                 string        // optional; seals upstream credentials
 	RebuildTimeout                            time.Duration // metadata rebuild timeout
+	Dedup                                     bool          // hardlink identical rpms on ingest
 }
 
 func Load(getenv func(string) string) (Config, error) {
@@ -80,6 +81,13 @@ func Load(getenv func(string) string) (Config, error) {
 			return c, fmt.Errorf("REBUILD_TIMEOUT: %w", err)
 		}
 		c.RebuildTimeout = d
+	}
+	if v := getenv("DEDUP"); v != "" {
+		b, err := strconv.ParseBool(v)
+		if err != nil {
+			return c, fmt.Errorf("DEDUP: %w", err)
+		}
+		c.Dedup = b
 	}
 	for _, p := range strings.Split(getenv("TRUSTED_PROXIES"), ",") {
 		if p = strings.TrimSpace(p); p == "" {

@@ -44,6 +44,8 @@ type Service struct {
 	MaxBytes  int64
 	// RebuildTimeout bounds one metadata rebuild; values <= 0 mean 10 minutes.
 	RebuildTimeout time.Duration
+	// Dedup hardlinks newly ingested files to an identical existing file (same sha256 and size).
+	Dedup bool
 
 	locks sync.Map // slug -> *sync.Mutex
 }
@@ -118,15 +120,18 @@ func (s *Service) Upload(ctx context.Context, slug, filename string, r io.Reader
 		return store.Package{}, err
 	}
 	final := filepath.Join(dir, filename)
-	if err := os.Link(tmp.Name(), final); err != nil { // fails if the name is taken
-		if os.IsExist(err) {
-			return store.Package{}, ErrExists
+	sum := hex.EncodeToString(h.Sum(nil))
+	if !s.linkDup(ctx, sum, n, final) {
+		if err := os.Link(tmp.Name(), final); err != nil { // fails if the name is taken
+			if os.IsExist(err) {
+				return store.Package{}, ErrExists
+			}
+			return store.Package{}, err
 		}
-		return store.Package{}, err
 	}
 	pkg, err := s.Store.AddPackageFirstStage(ctx, store.Package{
 		RepoID: repo.ID, Filename: filename, Name: meta.Name, Version: meta.Version,
-		Release: meta.Release, Arch: meta.Arch, SHA256: hex.EncodeToString(h.Sum(nil)), Size: n,
+		Release: meta.Release, Arch: meta.Arch, SHA256: sum, Size: n,
 	})
 	if err != nil {
 		os.Remove(final)
