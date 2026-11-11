@@ -10,6 +10,7 @@ A web service that manages signed dnf/yum repositories: upload rpms or pull them
 - **Sources** (first stage only): GitHub latest-release rpm (`owner/name`) and Plex Media Server, checked daily or on demand.
 - **Retention:** per repo, keep only the newest N versions of each package (default limit plus per-package overrides; 0 = unlimited). Packages are grouped by name and arch and ordered with rpm's version comparison. Enforced after every upload or promotion into the repo and when the limits are saved; each stage has its own limits.
 - **Mirrors:** a repo can mirror an upstream dnf repo (see below).
+- **Dedup:** identical rpms (same sha256 and size) share one file through hardlinks, so the same package in several repos or stages costs disk once. Set `DEDUP=true` to link new uploads, mirror syncs and sources as they arrive, and call `POST /api/dedup` to merge duplicates already on disk. Needs one filesystem for all repos.
 - Browse page, `<slug>.repo` file and RSS feed per repo, all under that repo's access rule.
 - React admin UI and a JSON API under `/api`.
 
@@ -101,4 +102,5 @@ Scripts authenticate with an admin API token (`Authorization: Bearer dnfr_...`, 
 | `GET/POST /api/repos/{slug}/sources`, `DELETE /api/sources/{id}`, `POST /api/sources/{id}/run` | sources |
 | `GET/POST /api/repo-users`, `DELETE /api/repo-users/{id}` | repo users and tokens |
 | `PUT /api/repos/{slug}/keep` `{"keep":3,"overrides":{"plexmediaserver":10}}` | set retention limits and purge now (returns the purged filenames) |
+| `POST /api/dedup` | hardlink identical rpms across all repos (returns `linked`, `bytes_saved`, `skipped`) |
 | `GET /api/repos/{slug}/audit` | activity log |

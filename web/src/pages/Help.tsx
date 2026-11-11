@@ -14,7 +14,8 @@ const terms: [string, string][] = [
   ['Mirror', 'A first-stage repo that copies an upstream dnf repo instead of taking uploads. It is empty when created and cannot be put behind another repo. Filters and a schedule are optional.'],
   ['Sync', 'One run of a mirror: fetch upstream metadata, download the new rpms that pass the filters, verify them, then publish all at once. Upstream deletions are not mirrored, and a package you delete by hand comes back next sync.'],
   ['Batch', 'The packages added by one sync, numbered. Promote a whole batch to the next stage in one step; the batch id stays with the packages in later stages.'],
-  ['GPG key', `Repo metadata is signed. Clients fetch the public key from ${o}/gpg.key.`],
+  ['Dedup', 'Saving disk by storing identical rpm files (same checksum and size) once and sharing them between repos with hardlinks. Deleting a package from one repo never affects the others.'],
+  ['GPG key',`Repo metadata is signed. Clients fetch the public key from ${o}/gpg.key.`],
 ]
 
 const flows: { id: string; title: string; steps: React.ReactNode[] }[] = [
@@ -58,6 +59,12 @@ const flows: { id: string; title: string; steps: React.ReactNode[] }[] = [
   { id: 'retention', title: 'Keep old versions under control', steps: [
     <>On the repo page open <em>Retention</em>. Set <em>Default versions to keep</em>, and add per-package overrides if some packages need more.</>,
     <>Click <em>Save &amp; apply</em>: it purges immediately and then after every upload or promotion. Each stage has its own limits.</>,
+  ] },
+  { id: 'dedup', title: 'Save disk space with dedup', steps: [
+    <>Promotion already shares files between stages. The same rpm uploaded, mirrored or fetched into different repos is stored once per repo unless dedup is on.</>,
+    <>Link new files as they arrive: set <code>DEDUP=true</code> on the server and restart. It is off by default.</>,
+    <>Merge duplicates already on disk with an API token: <code>curl -fsS -X POST -H "Authorization: Bearer $TOKEN" {o}/api/dedup</code>. It returns how many files were linked, the bytes saved and how many were skipped. It works whether or not <code>DEDUP</code> is set and publishes nothing new.</>,
+    <>Skipped files are missing, changed on disk, or on another filesystem. All repos need to share one filesystem for dedup to work.</>,
   ] },
   { id: 'automate', title: 'Automate from CI', steps: [
     <>Create a token on <a href="/tokens">API tokens</a> and store it as a CI secret.</>,
