@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { api, setUnauthorizedHandler, ApiError } from './api'
+import { api, setUnauthorizedHandler, ApiError, sourcesListLine } from './api'
 
 function mockFetch(status: number, body: unknown) {
   const f = vi.fn().mockResolvedValue({
@@ -87,5 +87,18 @@ describe('api', () => {
     await api.batches('el9'); expect(f.mock.calls[1][0]).toBe('/api/repos/el9/batches')
     await api.mirror('el9'); expect(f.mock.calls[2][0]).toBe('/api/repos/el9/mirror')
     await api.deleteMirror('el9'); expect(f.mock.calls[3][1].method).toBe('DELETE')
+  })
+})
+
+describe('deb repos', () => {
+  it('createRepo posts kind and deb fields', async () => {
+    const f = mockFetch(201, { slug: 'd' })
+    await api.createRepo({ slug: 'd', name: 'D', mode: 'public', kind: 'deb', suite: 'bookworm', components: ['main'], arches: ['amd64', 'arm64'] })
+    expect(JSON.parse(f.mock.calls[0][1].body)).toEqual({ slug: 'd', name: 'D', mode: 'public', kind: 'deb', suite: 'bookworm', components: ['main'], arches: ['amd64', 'arm64'] })
+  })
+
+  it('sourcesListLine matches the browse page line', () => {
+    const repo = { slug: 'd', kind: 'deb' as const, suite: 'bookworm', components: ['main', 'contrib'] }
+    expect(sourcesListLine(repo, 'https://repo.example')).toBe('deb [signed-by=/etc/apt/keyrings/dnfrepo.asc] https://repo.example/r/d/ bookworm main contrib')
   })
 })

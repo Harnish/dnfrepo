@@ -28,6 +28,8 @@ import (
 type UpstreamPkg struct {
 	Name, Arch, Version, Release, Filename, Href, SHA256 string
 	Size                                                 int64
+	// Deb only: the index component and the verbatim control stanza from the upstream Packages file.
+	Component, Control string
 }
 
 // Upstream reads a dnf repo at Base (http or https). Username/Token are sent
@@ -263,14 +265,21 @@ func (u *Upstream) primary(ctx context.Context, href string, sum checksumXML) ([
 // Download streams p into dst, verifying size and sha256. On error dst may hold
 // a partial or unverified body; the caller must discard it.
 func (u *Upstream) Download(ctx context.Context, p UpstreamPkg, dst io.Writer) error {
-	if !isHTTP(u.Base) || !safeHref(p.Href) {
+	return downloadVerified(ctx, u.client(), u.Base, u.Username, u.Token, p, u.MaxRPMBytes, dst)
+}
+
+// downloadVerified fetches base/p.Href into dst, enforcing the declared size and sha256 (and max
+// when positive). Shared by the rpm and deb upstreams.
+func downloadVerified(ctx context.Context, c *http.Client, base, user, token string, p UpstreamPkg, max int64, dst io.Writer) error {
+	if !isHTTP(base) || !safeHref(p.Href) {
 		return fmt.Errorf("package %q: unsafe location", p.Filename)
 	}
-	if u.MaxRPMBytes > 0 && p.Size > u.MaxRPMBytes {
-		return fmt.Errorf("package %q: size %d over limit %d", p.Filename, p.Size, u.MaxRPMBytes)
+	if max > 0 && p.Size > max {
+		return fmt.Errorf("package %q: size %d over limit %d", p.Filename, p.Size, max)
 	}
-	src := redact(u.url(p.Href))
-	body, err := u.get(ctx, p.Href)
+	full := strings.TrimSuffix(base, "/") + "/" + p.Href
+	src := redact(full)
+	body, err := get(ctx, c, full, user, token)
 	if err != nil {
 		return err
 	}
@@ -290,4 +299,10 @@ func (u *Upstream) Download(ctx context.Context, p UpstreamPkg, dst io.Writer) e
 		return fmt.Errorf("GET %s: %w", src, ErrChecksum)
 	}
 	return nil
+}
+
+// packageSource is what a sync reads from: an rpm (*Upstream) or apt (*AptUpstream) upstream.
+type packageSource interface {
+	Packages(ctx context.Context) ([]UpstreamPkg, error)
+	Download(ctx context.Context, p UpstreamPkg, dst io.Writer) error
 }

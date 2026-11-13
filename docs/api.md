@@ -18,9 +18,15 @@ Authorization: Bearer dnfr_...
 
 Errors are JSON: `{"error":"message"}`.
 
+## Repo kinds
+
+`POST /api/repos` takes `kind` (`rpm` default, or `deb`). For `deb` it also takes `suite` (default slug; `^[a-z0-9][a-z0-9.-]*$`), `components` (default `["main"]`) and `arches` (default `["amd64","arm64"]`, at least one besides `all`); these fields on an rpm repo are `400`. Repo objects return `kind`, and for deb `suite`, `components`, `arches`. `PATCH /api/repos/{slug}` accepts `arches` for deb repos (`409` for rpm); it only affects future uploads, promotions and indexing. A repo can only be linked behind a repo of the same kind (`409`).
+
 ## Packages
 
-A package file is an rpm. Filenames must match `^[A-Za-z0-9][A-Za-z0-9._+~-]*\.rpm$`; URL-encode them in paths.
+A package file is an rpm, or for a deb repo a `.deb` named `<Package>_<version without epoch>_<Arch>.deb` (`400` if the name does not match the control data). Deb package objects add `component`, and `version` holds the full Debian version including any epoch, with `release` empty. Promoting into a deb repo that does not accept the package's component or architecture is `409`. A Plex source on a deb repo is `409`.
+
+Rpm filenames must match `^[A-Za-z0-9][A-Za-z0-9._+~-]*\.rpm$`; URL-encode them in paths.
 
 ### Upload: `POST /api/repos/{slug}/packages`
 
@@ -83,7 +89,7 @@ A mirror repo refuses uploads and sources (`409`), and cannot be linked behind a
 
 ## Mirrors
 
-A mirror is an empty first-stage repo that syncs from an upstream dnf repo. Credentials are write-only: the token is stored encrypted (needs `SECRET_KEY`) and never returned. Keep tokens out of shell history, e.g. build the body with `jq` from an env var.
+A mirror is an empty first-stage repo that syncs from an upstream dnf repo, or for a deb repo from an apt archive. Credentials are write-only: the token is stored encrypted (needs `SECRET_KEY`) and never returned. Keep tokens out of shell history, e.g. build the body with `jq` from an env var.
 
 ### Parse a .repo file: `POST /api/mirror/parse-repo`
 
@@ -107,6 +113,8 @@ jq -n --arg tok "$UPSTREAM_TOKEN" '{upstream_url:"https://pkgs.example.org/el9/x
 - Variables are substituted and a metalink/mirrorlist is resolved to its first URL now; the resolved URL is stored. From a `.repo` file an http(s) `gpgkey` is fetched and `repo_gpgcheck=1` sets `require_signature`; `username`/`password` become the credentials.
 - PUT replaces every field except the credentials: an omitted `gpg_key`, filter or `schedule` is cleared. Omitting `token` keeps the stored one (this needs `SECRET_KEY`); `token:""` clears it; `clear_credentials:true` removes username and token. Only the first http(s) `gpgkey` URL of a `.repo` section is used.
 - `200`: the config (as GET). `400`: bad URL or schedule, `{"error","missing_vars":[...]}`, `{"error","sections":[ids]}` when a section must be chosen, credentials without `SECRET_KEY`, `require_signature` without a key. `409`: repo has packages or sources, or is a later stage.
+
+**Deb mirrors:** `PUT` on a deb repo takes `upstream_url` (the archive base, e.g. `https://deb.debian.org/debian/`), `suite` (required), `components` and `arches` (required, at least one real arch; they are also stored on the repo), plus the credential, `gpg_key`, `require_signature`, `include`, `exclude`, `keep_latest` and `schedule` fields above. `repo_file` is `400` for deb repos, and `suite`/`components` on an rpm repo are `400`. `GET` additionally returns `suite` and `components`. `parse-repo` stays rpm-only.
 
 ### Read / remove: `GET`, `DELETE /api/repos/{slug}/mirror`
 

@@ -1,6 +1,7 @@
 package api
 
 import (
+	"context"
 	"errors"
 	"log"
 	"net/http"
@@ -18,11 +19,12 @@ import (
 // Mirrors serves mirror configuration, manual sync, and sync batches.
 // Upstream credentials are write-only: the token is sealed with Box and never returned.
 type Mirrors struct {
-	Store  *store.Store
-	Syncer *mirror.Syncer
-	Box    *secretbox.Box // nil when SECRET_KEY is unset: credentials are then refused
-	Client *http.Client   // resolves metalink/mirrorlist/gpgkey on PUT; default 30s timeout
-	Actor  func(*http.Request) string
+	Store    *store.Store
+	Syncer   *mirror.Syncer
+	Box      *secretbox.Box // nil when SECRET_KEY is unset: credentials are then refused
+	Client   *http.Client   // resolves metalink/mirrorlist/gpgkey on PUT; default 30s timeout
+	Actor    func(*http.Request) string
+	OnChange func(slug string) // rebuild after deb settings change; wired to Publisher.Rebuild
 }
 
 var resolveClient = &http.Client{Timeout: 30 * time.Second}
@@ -146,7 +148,7 @@ func (a *Mirrors) Routes(mux *http.ServeMux) {
 			mirrorErr(w, err)
 			return
 		}
-		writeJSON(w, 200, toMirrorJSON(m))
+		a.writeMirror(w, r.Context(), repo, m)
 	})
 	mux.HandleFunc("PUT /api/repos/{slug}/mirror", a.put)
 	mux.HandleFunc("DELETE /api/repos/{slug}/mirror", func(w http.ResponseWriter, r *http.Request) {
@@ -236,12 +238,44 @@ func (a *Mirrors) put(w http.ResponseWriter, r *http.Request) {
 		GPGKey           string            `json:"gpg_key"`
 		RequireSignature bool              `json:"require_signature"`
 		Arches           []string          `json:"arches"`
+		Suite            string            `json:"suite"`
+		Components       []string          `json:"components"`
 		Include          []string          `json:"include"`
 		Exclude          []string          `json:"exclude"`
 		KeepLatest       int               `json:"keep_latest"`
 		Schedule         scheduleJSON      `json:"schedule"`
 	}
 	if !decode(w, r, &in) {
+		return
+	}
+	isDeb := repo.Kind == store.KindDeb
+	var debOld *store.DebRepo
+	deb := store.DebRepo{RepoID: repo.ID, Suite: in.Suite, Components: in.Components, Arches: in.Arches}
+	if isDeb {
+		if in.RepoFile != "" {
+			errJSON(w, 400, "deb mirrors take upstream_url, suite, components and arches, not a .repo file")
+			return
+		}
+		if err := deb.Validate(); err != nil {
+			errJSON(w, 400, err.Error())
+			return
+		}
+		// a populated repo keeps its suite and components: a change would orphan or mix packages
+		cur, err := a.Store.DebRepoByID(ctx, repo.ID)
+		if err != nil {
+			mirrorErr(w, err)
+			return
+		}
+		debOld = &cur
+		if pk, err := a.Store.ListPackages(ctx, repo.ID); err != nil {
+			mirrorErr(w, err)
+			return
+		} else if len(pk) > 0 && (cur.Suite != deb.Suite || slices.ContainsFunc(cur.Components, func(c string) bool { return !slices.Contains(deb.Components, c) })) {
+			errJSON(w, 409, "a deb mirror that already has packages keeps its suite and components; components can only be added")
+			return
+		}
+	} else if in.Suite != "" || len(in.Components) > 0 {
+		errJSON(w, 400, "suite and components are for deb repos")
 		return
 	}
 	if (in.UpstreamURL == "") == (in.RepoFile == "") {
@@ -385,11 +419,39 @@ func (a *Mirrors) put(w http.ResponseWriter, r *http.Request) {
 		mirrorErr(w, err)
 		return
 	}
+	if isDeb { // after SetMirror's eligibility check; settings were validated above
+		if err := a.Store.SetDebRepo(ctx, repo.ID, deb); err != nil {
+			mirrorErr(w, err)
+			return
+		}
+		if a.OnChange != nil && (debOld.Suite != deb.Suite || !slices.Equal(debOld.Components, deb.Components) || !slices.Equal(debOld.Arches, deb.Arches)) {
+			a.OnChange(repo.Slug) // dists/<suite> must match the new settings
+		}
+	}
 	a.audit(r, repo.ID, "mirror-configured", mirror.Redact(u))
 	saved, err := a.Store.MirrorByRepo(ctx, repo.ID)
 	if err != nil {
 		mirrorErr(w, err)
 		return
 	}
-	writeJSON(w, 200, toMirrorJSON(saved))
+	a.writeMirror(w, ctx, repo, saved)
+}
+
+// writeMirror renders a mirror; deb mirrors also carry their suite and components (arches is mirrors.arches).
+func (a *Mirrors) writeMirror(w http.ResponseWriter, ctx context.Context, repo store.Repo, m store.Mirror) {
+	out := toMirrorJSON(m)
+	if repo.Kind != store.KindDeb {
+		writeJSON(w, 200, out)
+		return
+	}
+	d, err := a.Store.DebRepoByID(ctx, repo.ID)
+	if err != nil {
+		mirrorErr(w, err)
+		return
+	}
+	writeJSON(w, 200, struct {
+		mirrorJSON
+		Suite      string   `json:"suite"`
+		Components []string `json:"components"`
+	}{out, d.Suite, nn(d.Components)})
 }

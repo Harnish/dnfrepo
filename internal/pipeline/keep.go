@@ -7,7 +7,6 @@ import (
 	"path/filepath"
 	"sort"
 
-	"dnfrepo/internal/rpmver"
 	"dnfrepo/internal/store"
 )
 
@@ -41,7 +40,7 @@ func (s *Service) purgeLocked(ctx context.Context, repo store.Repo, actor string
 			continue
 		}
 		sort.Slice(g, func(i, j int) bool { // newest first
-			if c := rpmver.ComparePackage(g[i].Version, g[i].Release, g[j].Version, g[j].Release); c != 0 {
+			if c := comparePackage(repo.Kind, g[i].Version, g[i].Release, g[j].Version, g[j].Release); c != 0 {
 				return c > 0
 			}
 			if !g[i].AddedAt.Equal(g[j].AddedAt) {

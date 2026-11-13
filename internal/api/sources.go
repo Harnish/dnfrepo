@@ -77,6 +77,10 @@ func (a *Sources) Routes(mux *http.ServeMux) {
 				return
 			}
 		case "plex":
+			if repo.Kind == store.KindDeb {
+				errJSON(w, 409, "plex sources provide rpm packages and cannot feed a deb repo")
+				return
+			}
 			in.Spec = ""
 		default:
 			errJSON(w, 400, "kind must be github or plex")

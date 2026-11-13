@@ -50,7 +50,7 @@ func (d Deps) dispatch(w http.ResponseWriter, r *http.Request) {
 		d.browse(w, r, repo)
 	case p == "feed.xml":
 		d.feed(w, r, repo)
-	case p == repo.Slug+".repo":
+	case p == repo.Slug+".repo" && repo.Kind != store.KindDeb:
 		d.repoFile(w, r, repo)
 	default:
 		d.file(w, r, repo, p)
@@ -59,6 +59,10 @@ func (d Deps) dispatch(w http.ResponseWriter, r *http.Request) {
 
 // file serves only <name>.rpm and repodata/<name>, as regular files inside the repo dir.
 func (d Deps) file(w http.ResponseWriter, r *http.Request, repo store.Repo, p string) {
+	if repo.Kind == store.KindDeb {
+		d.aptFile(w, r, repo, p)
+		return
+	}
 	dir := d.RepoDir(repo.Slug)
 	parts := strings.Split(p, "/")
 	var full string

@@ -15,6 +15,8 @@ const terms: [string, string][] = [
   ['Sync', 'One run of a mirror: fetch upstream metadata, download the new rpms that pass the filters, verify them, then publish all at once. Upstream deletions are not mirrored, and a package you delete by hand comes back next sync.'],
   ['Batch', 'The packages added by one sync, numbered. Promote a whole batch to the next stage in one step; the batch id stays with the packages in later stages.'],
   ['Dedup', 'Saving disk by storing identical rpm files (same checksum and size) once and sharing them between repos with hardlinks. Deleting a package from one repo never affects the others.'],
+  ['Suite (deb)', 'The apt release name in the sources.list line, such as bookworm or stable. Each deb repo has one; it defaults to the slug.'],
+  ['Component (deb)', 'A section inside a suite, such as main or contrib. Chosen when the deb repo is created. A package is promoted only into a stage that has its component.'],
   ['GPG key',`Repo metadata is signed. Clients fetch the public key from ${o}/gpg.key.`],
 ]
 
@@ -23,6 +25,16 @@ const flows: { id: string; title: string; steps: React.ReactNode[] }[] = [
     <>Open <a href="/">Repos</a> and fill in <em>New repo</em>: a slug (used in the URL), a name, and who can pull.</>,
     <>Leave <em>Promotes from</em> empty for a standalone repo.</>,
     <>Click <em>Create</em>, then open the repo from the list.</>,
+  ] },
+  { id: 'deb-repo', title: 'Create a deb repo and install from it', steps: [
+    <>On <a href="/">Repos</a>, choose <em>Format: deb (apt)</em>, then set the suite, components and architectures (defaults: slug, <code>main</code>, <code>amd64 arm64</code>).</>,
+    <>Open the repo and use <em>Upload deb</em>. The file must be named <code>package_version_arch.deb</code> (no epoch in the filename).</>,
+    <>On the client run the commands shown on the repo page: save <code>{o}/gpg.key</code> to <code>/etc/apt/keyrings/dnfrepo.asc</code>, add the <code>deb [signed-by=…]</code> line to <code>/etc/apt/sources.list.d/</code>, then <code>sudo apt update</code>.</>,
+  ] },
+  { id: 'deb-mirror', title: 'Mirror Debian or Ubuntu', steps: [
+    <>Create a deb repo and choose <em>Type: Mirror</em>. Its suite, components and architectures are set on the mirror form.</>,
+    <>Enter the archive URL (for example <code>https://deb.debian.org/debian/</code>), the suite (for example <code>bookworm</code>), components and architectures. Paste the archive's armored public key and tick <em>Require a valid signature</em> to verify upstream metadata.</>,
+    <>Save, then <em>Sync now</em>. Clients use this server's key and the repo's sources.list line, not Debian's.</>,
   ] },
   { id: 'add-packages', title: 'Add packages', steps: [
     <>Open the repo (it must be a first stage). Use <em>Upload rpm</em> to add a file, or add a <em>Source</em> (GitHub <code>owner/name</code> or Plex) and click <em>Run now</em>.</>,

@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"regexp"
 
+	"dnfrepo/internal/debmeta"
 	"dnfrepo/internal/pipeline"
 	"dnfrepo/internal/rpmmeta"
 	"dnfrepo/internal/store"
@@ -20,9 +21,10 @@ func pkgErr(w http.ResponseWriter, err error) {
 	switch {
 	case errors.Is(err, store.ErrNotFound):
 		errJSON(w, 404, "not found")
-	case errors.Is(err, pipeline.ErrNotFirstStage), errors.Is(err, pipeline.ErrExists), errors.Is(err, store.ErrMirrorRepo):
+	case errors.Is(err, pipeline.ErrNotFirstStage), errors.Is(err, pipeline.ErrExists), errors.Is(err, store.ErrMirrorRepo), errors.Is(err, pipeline.ErrDebIncompatible):
 		errJSON(w, 409, err.Error())
-	case errors.Is(err, pipeline.ErrBadFilename), errors.Is(err, rpmmeta.ErrNotRPM):
+	case errors.Is(err, pipeline.ErrBadFilename), errors.Is(err, rpmmeta.ErrNotRPM), errors.Is(err, debmeta.ErrNotDeb),
+		errors.Is(err, pipeline.ErrWrongKind), errors.Is(err, pipeline.ErrBadArch), errors.Is(err, pipeline.ErrFilenameMismatch):
 		errJSON(w, 400, err.Error())
 	case errors.Is(err, pipeline.ErrTooLarge):
 		errJSON(w, 413, err.Error())
@@ -41,10 +43,12 @@ type pkgJSON struct {
 	Size     int64  `json:"size"`
 	AddedAt  string `json:"added_at"`
 	Batch    *int64 `json:"origin_batch_id"`
+	// deb only
+	Component string `json:"component,omitempty"`
 }
 
 func toPkgJSON(p store.Package) pkgJSON {
-	return pkgJSON{p.Filename, p.Name, p.Version, p.Release, p.Arch, p.SHA256, p.Size, p.AddedAt.UTC().Format("2006-01-02T15:04:05Z"), p.OriginBatchID}
+	return pkgJSON{p.Filename, p.Name, p.Version, p.Release, p.Arch, p.SHA256, p.Size, p.AddedAt.UTC().Format("2006-01-02T15:04:05Z"), p.OriginBatchID, p.Component}
 }
 
 func (a *Packages) Routes(mux *http.ServeMux) {
@@ -180,7 +184,7 @@ func (a *Packages) RoutesDedup(mux *http.ServeMux) {
 	})
 }
 
-var pkgNameRe =regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._+-]*$`)
+var pkgNameRe = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._+-]*$`)
 
 // RoutesKeep registers PUT /api/repos/{slug}/keep: set the repo's retention limits and apply them now.
 func (a *Packages) RoutesKeep(mux *http.ServeMux) {

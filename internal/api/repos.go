@@ -20,6 +20,7 @@ type Repos struct {
 }
 
 type repoJSON struct {
+	Kind     string   `json:"kind"`
 	Slug     string   `json:"slug"`
 	Name     string   `json:"name"`
 	Mode     string   `json:"mode"`
@@ -28,10 +29,22 @@ type repoJSON struct {
 
 	Keep          int            `json:"keep"`
 	KeepOverrides map[string]int `json:"keep_overrides"`
+
+	// deb repos only
+	Suite      string   `json:"suite,omitempty"`
+	Components []string `json:"components,omitempty"`
+	Arches     []string `json:"arches,omitempty"`
 }
 
 func (a *Repos) toJSON(r *http.Request, rp store.Repo, byID map[int64]string) (repoJSON, error) {
-	out := repoJSON{Slug: rp.Slug, Name: rp.Name, Mode: string(rp.Mode), IPs: []string{}}
+	out := repoJSON{Kind: rp.Kind, Slug: rp.Slug, Name: rp.Name, Mode: string(rp.Mode), IPs: []string{}}
+	if rp.Kind == store.KindDeb {
+		d, err := a.Store.DebRepoByID(r.Context(), rp.ID)
+		if err != nil {
+			return out, err
+		}
+		out.Suite, out.Components, out.Arches = d.Suite, d.Components, d.Arches
+	}
 	if rp.PreviousID != nil {
 		p := byID[*rp.PreviousID]
 		out.Previous = &p
@@ -52,7 +65,7 @@ func (a *Repos) storeErr(w http.ResponseWriter, err error) {
 	switch {
 	case errors.Is(err, store.ErrNotFound):
 		errJSON(w, 404, err.Error())
-	case errors.Is(err, store.ErrBadSlug):
+	case errors.Is(err, store.ErrBadSlug), errors.Is(err, store.ErrBadDeb):
 		errJSON(w, 400, err.Error())
 	case errors.Is(err, store.ErrChain), errors.Is(err, store.ErrInChain), errors.Is(err, store.ErrExists), errors.Is(err, store.ErrHasContent), errors.Is(err, store.ErrMirrorRepo), errors.Is(err, store.ErrBusy):
 		errJSON(w, 409, err.Error())
@@ -87,6 +100,9 @@ func (a *Repos) Routes(mux *http.ServeMux) {
 		var in struct {
 			Slug, Name, Mode string
 			Previous         *string
+			Kind, Suite      string
+			Components       []string
+			Arches           []string
 		}
 		if !decode(w, r, &in) {
 			return
@@ -103,7 +119,28 @@ func (a *Repos) Routes(mux *http.ServeMux) {
 		if in.Name == "" {
 			in.Name = in.Slug
 		}
-		rp, err := a.Store.CreateRepo(r.Context(), in.Slug, in.Name, store.AccessMode(in.Mode), prev)
+		var rp store.Repo
+		var err error
+		switch in.Kind {
+		case "", store.KindRPM:
+			if in.Suite != "" || in.Components != nil || in.Arches != nil {
+				errJSON(w, 400, "suite, components and arches only apply to deb repos")
+				return
+			}
+			rp, err = a.Store.CreateRepo(r.Context(), in.Slug, in.Name, store.AccessMode(in.Mode), prev)
+		case store.KindDeb:
+			d := store.DebRepo{Suite: in.Suite, Components: in.Components, Arches: in.Arches}
+			if d.Components == nil {
+				d.Components = []string{"main"}
+			}
+			if d.Arches == nil {
+				d.Arches = []string{"amd64", "arm64"}
+			}
+			rp, err = a.Store.CreateDebRepo(r.Context(), in.Slug, in.Name, store.AccessMode(in.Mode), prev, d)
+		default:
+			errJSON(w, 400, "kind must be rpm or deb")
+			return
+		}
 		if err != nil {
 			a.storeErr(w, err)
 			return
@@ -146,8 +183,15 @@ func (a *Repos) Routes(mux *http.ServeMux) {
 			a.storeErr(w, err)
 			return
 		}
-		var in struct{ Name, Mode string }
+		var in struct {
+			Name, Mode string
+			Arches     []string
+		}
 		if !decode(w, r, &in) {
+			return
+		}
+		if in.Arches != nil && rp.Kind != store.KindDeb {
+			errJSON(w, 409, "only deb repos have architectures")
 			return
 		}
 		if in.Name == "" {
@@ -160,9 +204,23 @@ func (a *Repos) Routes(mux *http.ServeMux) {
 			errJSON(w, 400, "invalid mode")
 			return
 		}
+		if in.Arches != nil {
+			d, err := a.Store.DebRepoByID(r.Context(), rp.ID)
+			if err == nil {
+				d.Arches = in.Arches
+				err = a.Store.SetDebRepo(r.Context(), rp.ID, d)
+			}
+			if err != nil {
+				a.storeErr(w, err)
+				return
+			}
+		}
 		if err := a.Store.UpdateRepo(r.Context(), rp.ID, in.Name, store.AccessMode(in.Mode)); err != nil {
 			a.storeErr(w, err)
 			return
+		}
+		if in.Arches != nil && a.OnChange != nil {
+			a.OnChange(rp.Slug) // the index lists the new architectures
 		}
 		writeJSON(w, 200, map[string]string{"status": "ok"})
 	})

@@ -38,7 +38,7 @@ func (s *Service) Promote(ctx context.Context, fromSlug string, filenames []stri
 	seen := map[string]bool{}
 	var names []string
 	for _, f := range filenames {
-		if !filenameRe.MatchString(f) {
+		if !validPackageFilename(f) {
 			return res, ErrBadFilename
 		}
 		if !seen[f] {
@@ -58,6 +58,9 @@ func (s *Service) Promote(ctx context.Context, fromSlug string, filenames []stri
 		return res, ErrNoNextStage
 	}
 	res.To = to.Slug
+	if from.Kind != to.Kind {
+		return res, ErrWrongKind
+	}
 	defer s.lock(to.Slug)()
 
 	var missing []string
@@ -88,6 +91,18 @@ func (s *Service) Promote(ctx context.Context, fromSlug string, filenames []stri
 	}
 	if len(todo) == 0 {
 		return res, nil
+	}
+
+	if to.Kind == store.KindDeb {
+		d, err := s.Store.DebRepoByID(ctx, to.ID)
+		if err != nil {
+			return res, err
+		}
+		for _, p := range todo {
+			if !debAccepts(d, p.Component, p.Arch) {
+				return res, fmt.Errorf("%w: %s (%s, %s)", ErrDebIncompatible, p.Filename, p.Component, p.Arch)
+			}
+		}
 	}
 
 	srcDir, dstDir := s.Publisher.RepoDir(from.Slug), s.Publisher.RepoDir(to.Slug)

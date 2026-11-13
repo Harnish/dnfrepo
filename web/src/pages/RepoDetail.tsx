@@ -3,7 +3,7 @@ import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom'
 import { nextMirrorFor } from '../mirrorState'
 import MirrorPanel from './MirrorPanel'
 import BatchTable from './BatchTable'
-import { api, ApiError, AuditEvent, Batch, fmtSize, Mode, Pkg, Repo, RepoUser, Source } from '../api'
+import { api, ApiError, AuditEvent, Batch, fmtSize, Mode, Pkg, Repo, RepoUser, Source, sourcesListLine } from '../api'
 
 export default function RepoDetail() {
   const { slug = '' } = useParams()
@@ -28,6 +28,7 @@ export default function RepoDetail() {
 
   const repo = repos.find((r) => r.slug === slug)
   const next = repos.find((r) => r.previous === slug)
+  const deb = repo?.kind === 'deb'
   const first = repo ? !repo.previous : false
   const isMirror = mirrorFor === slug && first
 
@@ -79,27 +80,34 @@ export default function RepoDetail() {
     <>
       <h1>{repo.name} <span className={`badge ${repo.mode}`}>{repo.mode}</span></h1>
       <p>
-        <a href={`/r/${slug}/`}>Browse</a> · <a href={`/r/${slug}/${slug}.repo`}>{slug}.repo</a> · <a href={`/r/${slug}/feed.xml`}>RSS</a>
+        <a href={`/r/${slug}/`}>Browse</a> · {!deb && <><a href={`/r/${slug}/${slug}.repo`}>{slug}.repo</a> · </>}<a href={`/r/${slug}/feed.xml`}>RSS</a>
         {repo.previous && <> · promoted from <Link to={`/repos/${repo.previous}`}>{repo.previous}</Link></>}
         {next && <> · promotes to <Link to={`/repos/${next.slug}`}>{next.name}</Link></>}
       </p>
-      <p className="muted">Install: <code>sudo dnf config-manager addrepo --from-repofile={location.origin}/r/{slug}/{slug}.repo</code></p>
+      {deb ? (
+        <div className="muted">
+          Install:
+          <pre>{`curl -fsS ${location.origin}/gpg.key | sudo tee /etc/apt/keyrings/dnfrepo.asc\necho "${sourcesListLine(repo, location.origin)}" | sudo tee /etc/apt/sources.list.d/${slug}.list\nsudo apt update`}</pre>
+        </div>
+      ) : (
+        <p className="muted">Install: <code>sudo dnf config-manager addrepo --from-repofile={location.origin}/r/{slug}/{slug}.repo</code></p>
+      )}
       {err && <p className="error">{err}</p>}
       {msg && <p className="ok">{msg}</p>}
 
       <h2>Packages</h2>
       <table>
-        <thead><tr><th /><th>Name</th><th>Version</th><th>Arch</th><th>Size</th><th>File</th><th /></tr></thead>
+        <thead><tr><th /><th>Name</th><th>Version</th><th>Arch</th>{deb && <th>Component</th>}<th>Size</th><th>File</th><th /></tr></thead>
         <tbody>
           {pkgs.map((p) => (
             <tr key={p.filename}>
               <td><input type="checkbox" checked={selected.has(p.filename)} onChange={() => toggle(p.filename)} aria-label={`select ${p.filename}`} /></td>
-              <td>{p.name}</td><td>{p.version}-{p.release}</td><td>{p.arch}</td><td>{fmtSize(p.size)}</td>
-              <td><a href={`/r/${slug}/${p.filename}`}>{p.filename}</a></td>
+              <td>{p.name}</td><td>{deb ? p.version : `${p.version}-${p.release}`}</td><td>{p.arch}</td>{deb && <td>{p.component}</td>}<td>{fmtSize(p.size)}</td>
+              <td><a href={deb ? `/r/${slug}/pool/${p.component}/${p.filename}` : `/r/${slug}/${p.filename}`}>{p.filename}</a></td>
               <td><button onClick={() => confirm(`Delete ${p.filename}?`) && run(async () => { await api.deletePackage(slug, p.filename); await load() })}>Delete</button></td>
             </tr>
           ))}
-          {pkgs.length === 0 && <tr><td colSpan={7} className="muted">No packages.</td></tr>}
+          {pkgs.length === 0 && <tr><td colSpan={deb ? 8 : 7} className="muted">No packages.</td></tr>}
         </tbody>
       </table>
       <div className="row">
@@ -114,8 +122,8 @@ export default function RepoDetail() {
           </button>
         )}
         {first && !isMirror && (
-          <label className="upload">Upload rpm
-            <input type="file" accept=".rpm" onChange={(e) => { const f = e.target.files?.[0]; if (f) run(async () => { await api.upload(slug, f); await load() }, `Uploaded ${f.name}`); e.target.value = '' }} />
+          <label className="upload">{deb ? 'Upload deb' : 'Upload rpm'}
+            <input type="file" accept={deb ? '.deb' : '.rpm'} onChange={(e) => { const f = e.target.files?.[0]; if (f) run(async () => { await api.upload(slug, f); await load() }, `Uploaded ${f.name}`); e.target.value = '' }} />
           </label>
         )}
         {first && isMirror && <span className="muted">Packages arrive by sync.</span>}
@@ -195,7 +203,7 @@ export default function RepoDetail() {
           </table>
           <form className="row" onSubmit={(ev) => { ev.preventDefault(); run(async () => { await api.addSource(slug, src.kind, src.spec); setSrc({ ...src, spec: '' }); await load() }) }}>
             <select value={src.kind} onChange={(e) => setSrc({ ...src, kind: e.target.value })}>
-              <option value="github">GitHub release</option><option value="plex">Plex Media Server</option>
+              <option value="github">GitHub release</option>{!deb && <option value="plex">Plex Media Server</option>}
             </select>
             {src.kind === 'github' && <input value={src.spec} onChange={(e) => setSrc({ ...src, spec: e.target.value })} placeholder="owner/name or github.com URL" required />}
             <button>Add source</button>
@@ -203,7 +211,7 @@ export default function RepoDetail() {
         </>
       )}
 
-      {isMirror && <MirrorPanel slug={slug} next={next?.name} onChanged={load} />}
+      {isMirror && <MirrorPanel slug={slug} deb={deb} next={next?.name} onChanged={load} />}
       {/* batches promoted into a later stage (or left on a former mirror) stay promotable */}
       {!isMirror && batches.length > 0 && (
         <BatchTable batches={batches} next={next?.name} onPromote={(b) => next && confirm(`Promote every package from batch ${b.id} to ${next.name}?`) && run(async () => {

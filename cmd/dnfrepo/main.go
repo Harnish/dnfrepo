@@ -44,6 +44,7 @@ func main() {
 		log.Fatal(err)
 	}
 	pub := publish.New(cfg.DataDir, sg)
+	pub.Store = st
 	rebuild := func(slug string) {
 		if err := pub.Rebuild(context.Background(), slug); err != nil {
 			log.Printf("rebuild %s: %v", slug, err)
@@ -53,7 +54,11 @@ func main() {
 	if repos, err := st.ListRepos(ctx); err == nil {
 		for _, r := range repos {
 			os.MkdirAll(pub.RepoDir(r.Slug), 0o755)
-			if _, err := os.Lstat(filepath.Join(pub.RepoDir(r.Slug), "repodata")); err != nil {
+			published := "repodata"
+			if r.Kind == store.KindDeb {
+				published = "dists"
+			}
+			if _, err := os.Lstat(filepath.Join(pub.RepoDir(r.Slug), published)); err != nil {
 				rebuild(r.Slug)
 			}
 		}
@@ -96,7 +101,7 @@ func main() {
 		RepoUsers: &api.RepoUsers{Store: st},
 		Packages:  &api.Packages{Pipeline: pl, Actor: actor},
 		Sources:   &api.Sources{Store: st, Scheduler: sch},
-		Mirrors:   &api.Mirrors{Store: st, Syncer: syncer, Box: box, Actor: actor},
+		Mirrors:   &api.Mirrors{Store: st, Syncer: syncer, Box: box, Actor: actor, OnChange: rebuild},
 		Serve: serve.Handler(serve.Deps{Store: st, RepoDir: pub.RepoDir, PublicKey: sg.PublicKeyArmored(),
 			BaseURL: cfg.BaseURL, Trusted: cfg.TrustedProxies}),
 		Static: web.Dist(),

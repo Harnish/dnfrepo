@@ -2,6 +2,7 @@ package sources
 
 import (
 	"context"
+	"dnfrepo/internal/debmeta"
 	"fmt"
 	"io"
 	"log"
@@ -49,6 +50,23 @@ func (s *Scheduler) latest(ctx context.Context, src store.Source) (Release, erro
 	return Release{}, fmt.Errorf("unknown source kind %q", src.Kind)
 }
 
+// latestDeb is latest for a deb repo: only GitHub sources apply, and they pick a .deb asset for
+// one of the repo's architectures.
+func (s *Scheduler) latestDeb(ctx context.Context, src store.Source, repo store.Repo) ([]Release, error) {
+	if src.Kind != "github" {
+		return nil, fmt.Errorf("%s sources provide rpm packages and cannot feed a deb repo", src.Kind)
+	}
+	d, err := s.Store.DebRepoByID(ctx, repo.ID)
+	if err != nil {
+		return nil, err
+	}
+	api := s.GitHubAPI
+	if api == "" {
+		api = "https://api.github.com"
+	}
+	return LatestGitHubDeb(ctx, s.client(), api, s.GitHubToken, src.Spec, d.Arches)
+}
+
 // RunOne checks one source and records the outcome on it.
 func (s *Scheduler) RunOne(ctx context.Context, id int64) error {
 	src, err := s.Store.SourceByID(ctx, id)
@@ -69,10 +87,34 @@ func (s *Scheduler) fetch(ctx context.Context, src store.Source) (string, error)
 	if err != nil {
 		return "", err
 	}
-	rel, err := s.latest(ctx, src)
+	rels := []Release{}
+	if repo.Kind == store.KindDeb {
+		rels, err = s.latestDeb(ctx, src, repo)
+	} else {
+		var rel Release
+		if rel, err = s.latest(ctx, src); err == nil {
+			rels = append(rels, rel)
+		}
+	}
 	if err != nil {
 		return "", err
 	}
+	status := "up to date"
+	for _, rel := range rels {
+		got, err := s.fetchOne(ctx, src, repo, rel)
+		if err != nil {
+			return "", err
+		}
+		if got == "downloaded" {
+			status = got
+		}
+	}
+	return status, nil
+}
+
+// fetchOne downloads rel into repo unless the repo already has it. A deb is stored under the name
+// its control data dictates, whatever the asset was called.
+func (s *Scheduler) fetchOne(ctx context.Context, src store.Source, repo store.Repo, rel Release) (string, error) {
 	if _, err := s.Store.PackageByFilename(ctx, repo.ID, rel.Filename); err == nil {
 		return "up to date", nil
 	}
@@ -97,6 +139,18 @@ func (s *Scheduler) fetch(ctx context.Context, src store.Source) (string, error)
 	if _, err := io.Copy(tmp, resp.Body); err != nil {
 		return "", err
 	}
+	name := rel.Filename
+	if repo.Kind == store.KindDeb {
+		c, err := debmeta.Parse(tmp.Name())
+		if err != nil {
+			return "", fmt.Errorf("%s: %w", rel.Filename, err)
+		}
+		if name = debmeta.Filename(c); name != rel.Filename {
+			if _, err := s.Store.PackageByFilename(ctx, repo.ID, name); err == nil {
+				return "up to date", nil
+			}
+		}
+	}
 	if _, err := tmp.Seek(0, io.SeekStart); err != nil {
 		return "", err
 	}
@@ -104,7 +158,7 @@ func (s *Scheduler) fetch(ctx context.Context, src store.Source) (string, error)
 	if src.Spec != "" {
 		actor += ":" + src.Spec
 	}
-	if _, err := s.Pipeline.Upload(ctx, repo.Slug, rel.Filename, tmp, actor); err != nil {
+	if _, err := s.Pipeline.Upload(ctx, repo.Slug, name, tmp, actor); err != nil {
 		return "", err
 	}
 	return "downloaded", nil

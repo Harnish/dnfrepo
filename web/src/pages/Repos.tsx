@@ -1,6 +1,6 @@
 import { FormEvent, useCallback, useEffect, useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
-import { api, Mode, Repo } from '../api'
+import { api, Kind, Mode, Repo } from '../api'
 
 // chains: each head (no previous) followed by its successors
 function chains(repos: Repo[]): Repo[][] {
@@ -17,20 +17,24 @@ export default function Repos() {
   const nav = useNavigate()
   const [mirror, setMirror] = useState(false)
   const [err, setErr] = useState('')
-  const [f, setF] = useState({ slug: '', name: '', mode: 'public' as Mode, previous: '' })
+  const [f, setF] = useState({ slug: '', name: '', mode: 'public' as Mode, previous: '', kind: 'rpm' as Kind, suite: '', components: 'main', arches: 'amd64 arm64' })
   const load = useCallback(() => api.repos().then(setRepos).catch((x) => setErr(x.message)), [])
   useEffect(() => { load() }, [load])
 
   const hasNext = new Set(repos.map((r) => r.previous).filter(Boolean))
-  const tails = repos.filter((r) => !hasNext.has(r.slug))
+  const tails = repos.filter((r) => !hasNext.has(r.slug) && r.kind === f.kind) // a chain never mixes rpm and deb
 
   async function create(ev: FormEvent) {
     ev.preventDefault()
     setErr('')
     try {
-      await api.createRepo({ slug: f.slug, name: f.name || f.slug, mode: f.mode, previous: mirror ? undefined : f.previous || undefined })
+      const words = (s: string) => s.split(/[\s,]+/).filter(Boolean)
+      await api.createRepo({
+        slug: f.slug, name: f.name || f.slug, mode: f.mode, previous: mirror ? undefined : f.previous || undefined,
+        ...(f.kind === 'deb' ? { kind: 'deb' as Kind, suite: f.suite || undefined, components: words(f.components), arches: words(f.arches) } : {}),
+      })
       const slug = f.slug
-      setF({ slug: '', name: '', mode: 'public', previous: '' })
+      setF({ ...f, slug: '', name: '', mode: 'public', previous: '' })
       if (mirror) { setMirror(false); nav(`/repos/${slug}?mirror=1`); return }
       load()
     } catch (x) { setErr((x as Error).message) }
@@ -45,7 +49,7 @@ export default function Repos() {
           {c.map((r, i) => (
             <span key={r.slug}>
               {i > 0 && <span className="arrow"> → </span>}
-              <Link to={`/repos/${r.slug}`}>{r.name}</Link> <span className={`badge ${r.mode}`}>{r.mode}</span>
+              <Link to={`/repos/${r.slug}`}>{r.name}</Link> <span className={`badge ${r.mode}`}>{r.mode}</span>{r.kind === 'deb' && <> <span className="badge">deb</span></>}
             </span>
           ))}
         </div>
@@ -62,6 +66,11 @@ export default function Repos() {
               <option value="public">public</option><option value="ips">ips</option><option value="users">users</option>
             </select>
           </label>
+          <label>Format
+            <select value={f.kind} onChange={(e) => setF({ ...f, kind: e.target.value as Kind, previous: '' })}>
+              <option value="rpm">rpm (dnf)</option><option value="deb">deb (apt)</option>
+            </select>
+          </label>
           <label>Type
             <select value={mirror ? 'mirror' : 'standard'} onChange={(e) => setMirror(e.target.value === 'mirror')}>
               <option value="standard">Standard</option><option value="mirror">Mirror</option>
@@ -74,6 +83,13 @@ export default function Repos() {
             </select>
           </label>
         </div>
+        {f.kind === 'deb' && (
+          <div className="row">
+            <label>Suite<input value={f.suite} onChange={(e) => setF({ ...f, suite: e.target.value })} placeholder={f.slug || 'stable'} /></label>
+            <label>Components<input value={f.components} onChange={(e) => setF({ ...f, components: e.target.value })} placeholder="main" /></label>
+            <label>Architectures<input value={f.arches} onChange={(e) => setF({ ...f, arches: e.target.value })} placeholder="amd64 arm64" /></label>
+          </div>
+        )}
         <button className="primary">Create</button>
       </form>
     </>

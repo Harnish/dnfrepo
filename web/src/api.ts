@@ -5,8 +5,9 @@ export class ApiError extends Error {
 }
 
 export type Mode = 'public' | 'ips' | 'users'
-export interface Repo { slug: string; name: string; mode: Mode; previous: string | null; ips: string[]; keep: number; keep_overrides: Record<string, number> }
-export interface Pkg { filename: string; name: string; version: string; release: string; arch: string; sha256: string; size: number; added_at: string; origin_batch_id: number | null }
+export type Kind = 'rpm' | 'deb'
+export interface Repo { slug: string; name: string; kind: Kind; mode: Mode; previous: string | null; ips: string[]; keep: number; keep_overrides: Record<string, number>; suite?: string; components?: string[]; arches?: string[] }
+export interface Pkg { filename: string; name: string; version: string; release: string; arch: string; sha256: string; size: number; component?: string; added_at: string; origin_batch_id: number | null }
 export interface Source { id: number; kind: 'github' | 'plex'; spec: string; last_run: string | null; last_status: string; last_error: string }
 export interface RepoUser { id: number; name: string; revoked: boolean }
 export interface AuditEvent { id: number; actor: string; action: string; detail: string; at: string }
@@ -17,6 +18,7 @@ export interface MirrorSchedule { frequency: 'manual' | 'daily' | 'weekly' | 'mo
 export interface Mirror {
   upstream_url: string; username: string; has_credentials: boolean; gpg_key: string; require_signature: boolean
   arches: string[]; include: string[]; exclude: string[]; keep_latest: number; schedule: MirrorSchedule
+  suite?: string; components?: string[]
   state: 'idle' | 'running'; last_run: string | null; last_status: string; last_error: string; next_run: string | null
 }
 export interface RepoSection { id: string; name: string; url_kind: string; variables: string[]; has_credentials: boolean }
@@ -26,7 +28,7 @@ export interface MirrorInput {
   upstream_url?: string; repo_file?: string; section?: string; vars?: Record<string, string>
   username?: string; token?: string; clear_credentials?: boolean
   gpg_key?: string; require_signature?: boolean; arches?: string[]; include?: string[]; exclude?: string[]; keep_latest?: number
-  schedule?: MirrorSchedule
+  schedule?: MirrorSchedule; suite?: string; components?: string[]
 }
 
 let onUnauthorized: () => void = () => {}
@@ -56,7 +58,7 @@ export const api = {
   logout: () => req<unknown>('POST', '/api/auth/logout'),
 
   repos: () => req<Repo[]>('GET', '/api/repos'),
-  createRepo: (r: { slug: string; name: string; mode: Mode; previous?: string }) => req<Repo>('POST', '/api/repos', r),
+  createRepo: (r: { slug: string; name: string; mode: Mode; previous?: string; kind?: Kind; suite?: string; components?: string[]; arches?: string[] }) => req<Repo>('POST', '/api/repos', r),
   updateRepo: (slug: string, r: { name?: string; mode?: Mode }) => req<unknown>('PATCH', `/api/repos/${e(slug)}`, r),
   deleteRepo: (slug: string) => req<unknown>('DELETE', `/api/repos/${e(slug)}`),
   setPrevious: (slug: string, previous: string | null) => req<unknown>('PUT', `/api/repos/${e(slug)}/previous`, { previous }),
@@ -98,6 +100,11 @@ export async function repoFileWithToken(slug: string, user: string, token: strin
   const res = await fetch(`/r/${e(slug)}/${e(slug)}.repo`, { headers: { Authorization: 'Basic ' + btoa(`${user}:${token}`) } })
   if (!res.ok) throw new ApiError(res.status, `could not fetch .repo (HTTP ${res.status}); is ${user} granted on ${slug}?`)
   return (await res.text()).replace('YOUR_USERNAME', user).replace('YOUR_TOKEN', token)
+}
+
+/** The apt sources.list line for a deb repo; same as the one on the repo's browse page. */
+export function sourcesListLine(repo: Pick<Repo, 'slug' | 'suite' | 'components'>, origin: string): string {
+  return `deb [signed-by=/etc/apt/keyrings/dnfrepo.asc] ${origin}/r/${repo.slug}/ ${repo.suite} ${(repo.components ?? []).join(' ')}`
 }
 
 export function download(filename: string, text: string) {

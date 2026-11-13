@@ -19,6 +19,7 @@ import (
 
 	"golang.org/x/sync/errgroup"
 
+	"dnfrepo/internal/debmeta"
 	"dnfrepo/internal/pipeline"
 	"dnfrepo/internal/rpmmeta"
 	"dnfrepo/internal/secretbox"
@@ -133,8 +134,18 @@ func (s *Syncer) run(ctx context.Context, repoID int64, actor string, token *str
 	if maxRPM <= 0 {
 		maxRPM = defaultMaxRPM
 	}
-	up := &Upstream{Base: m.UpstreamURL, Client: s.Client, Username: m.Username, Token: *token,
+	var up packageSource = &Upstream{Base: m.UpstreamURL, Client: s.Client, Username: m.Username, Token: *token,
 		GPGKey: m.GPGKey, RequireSig: m.RequireSig, MaxRPMBytes: maxRPM}
+	filter := Filter{Arches: m.Arches, Include: m.Include, Exclude: m.Exclude, KeepLatest: m.KeepLatest}
+	if repo.Kind == store.KindDeb {
+		d, err := s.Store.DebRepoByID(ctx, repoID)
+		if err != nil {
+			return Result{}, err
+		}
+		up = &AptUpstream{Base: m.UpstreamURL, Suite: d.Suite, Components: d.Components, Arches: d.Arches, Client: s.Client,
+			Username: m.Username, Token: *token, GPGKey: m.GPGKey, RequireSig: m.RequireSig, MaxDebBytes: maxRPM}
+		filter.Arches, filter.Compare = d.Arches, debCompare
+	}
 
 	all, err := up.Packages(ctx)
 	if err != nil {
@@ -152,7 +163,7 @@ func (s *Syncer) run(ctx context.Context, repoID int64, actor string, token *str
 	if err != nil {
 		return Result{}, err
 	}
-	want, err := Plan(all, have, Filter{Arches: m.Arches, Include: m.Include, Exclude: m.Exclude, KeepLatest: m.KeepLatest}, keep, overrides)
+	want, err := Plan(all, have, filter, keep, overrides)
 	if err != nil {
 		return Result{}, err
 	}
@@ -220,7 +231,7 @@ var shaRe = regexp.MustCompile(`^[0-9a-f]{64}$`)
 // stageAll downloads want into dir with at most Concurrency in flight. A
 // failure does not cancel sibling downloads, so whatever verifies is kept for
 // the retry; ctx cancellation stops them all.
-func (s *Syncer) stageAll(ctx context.Context, up *Upstream, dir string, want []UpstreamPkg) ([]pipeline.StagedFile, error) {
+func (s *Syncer) stageAll(ctx context.Context, up packageSource, dir string, want []UpstreamPkg) ([]pipeline.StagedFile, error) {
 	n := s.Concurrency
 	if n <= 0 {
 		n = defaultConcurrency
@@ -236,7 +247,7 @@ func (s *Syncer) stageAll(ctx context.Context, up *Upstream, dir string, want []
 	files := make([]pipeline.StagedFile, len(want))
 	for i, p := range want {
 		path := filepath.Join(dir, p.SHA256)
-		files[i] = pipeline.StagedFile{Path: path, Filename: p.Filename, SHA256: p.SHA256, Size: p.Size}
+		files[i] = pipeline.StagedFile{Path: path, Filename: p.Filename, SHA256: p.SHA256, Size: p.Size, Component: p.Component, Control: p.Control}
 		if started[p.SHA256] {
 			continue
 		}
@@ -253,7 +264,7 @@ func (s *Syncer) stageAll(ctx context.Context, up *Upstream, dir string, want []
 // it is trusted. A new body goes to path.part and is renamed into place only
 // after Download verified it; path itself is never opened for writing, since
 // after ingest it may share an inode with the published rpm.
-func stage(ctx context.Context, up *Upstream, p UpstreamPkg, path string) error {
+func stage(ctx context.Context, up packageSource, p UpstreamPkg, path string) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
@@ -303,9 +314,21 @@ func verified(path string, p UpstreamPkg) (bool, error) {
 	return false, nil
 }
 
-// checkHeaders fails unless every staged rpm's header NEVRA matches its upstream entry.
+// checkHeaders fails unless every staged package's own identity (rpm header NEVRA, or deb
+// control Package/Version/Architecture) matches its upstream entry.
 func checkHeaders(files []pipeline.StagedFile, want []UpstreamPkg) error {
 	for i, f := range files {
+		if strings.HasSuffix(f.Filename, ".deb") {
+			c, err := debmeta.Parse(f.Path)
+			if err != nil {
+				return fmt.Errorf("%s: %w", f.Filename, err)
+			}
+			if p := want[i]; c.Package != p.Name || c.Version != p.Version || c.Arch != p.Arch {
+				return fmt.Errorf("%s: deb control data says %s %s %s, upstream metadata says %s %s %s", f.Filename,
+					c.Package, c.Version, c.Arch, p.Name, p.Version, p.Arch)
+			}
+			continue
+		}
 		m, err := rpmmeta.Parse(f.Path)
 		if err != nil {
 			return fmt.Errorf("%s: %w", f.Filename, err)

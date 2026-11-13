@@ -22,8 +22,10 @@ type Publisher struct {
 	// Incremental makes Rebuild reuse the previous repodata (createrepo_c --update).
 	// Off by default: measured no faster than a full build (see commit perf(publish)).
 	Incremental bool
-	mu          sync.Mutex
-	locks       map[string]*sync.Mutex
+	// Store lets Rebuild tell deb repos from rpm repos; nil means every repo is an rpm repo.
+	Store *store.Store
+	mu    sync.Mutex
+	locks map[string]*sync.Mutex
 }
 
 func New(dataDir string, s *signer.Signer) *Publisher {
@@ -52,6 +54,15 @@ func (p *Publisher) Rebuild(ctx context.Context, slug string) error {
 	l.Lock()
 	defer l.Unlock()
 
+	if p.Store != nil {
+		repo, err := p.Store.RepoBySlug(ctx, slug)
+		if err != nil {
+			return fmt.Errorf("look up repo %s: %w", slug, err)
+		}
+		if repo.Kind == store.KindDeb {
+			return p.rebuildApt(ctx, repo)
+		}
+	}
 	dir := p.RepoDir(slug)
 	gen := fmt.Sprintf("%d", time.Now().UnixNano())
 	build := filepath.Join(dir, ".build-"+gen)
@@ -91,18 +102,18 @@ func (p *Publisher) Rebuild(ctx context.Context, slug string) error {
 		os.Remove(tmpLink)
 		return err
 	}
-	return pruneGenerations(dir)
+	return pruneGenerations(dir, "repodata.")
 }
 
-// pruneGenerations keeps the two newest repodata.<n> directories.
-func pruneGenerations(dir string) error {
+// pruneGenerations keeps the two newest <prefix><n> directories ("repodata." or "dists.").
+func pruneGenerations(dir, prefix string) error {
 	ents, err := os.ReadDir(dir)
 	if err != nil {
 		return err
 	}
 	var gens []string
 	for _, e := range ents {
-		if e.IsDir() && strings.HasPrefix(e.Name(), "repodata.") {
+		if e.IsDir() && strings.HasPrefix(e.Name(), prefix) {
 			gens = append(gens, e.Name())
 		}
 	}

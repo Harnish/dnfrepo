@@ -15,6 +15,9 @@ type Package struct {
 	Size                             int64
 	AddedAt                          time.Time
 	OriginBatchID                    *int64 // sync batch that brought it in; follows the package through promotion
+
+	// deb only ('' for rpm): index data apt needs.
+	Component, Control, MD5, SHA1 string
 }
 
 type AuditEvent struct {
@@ -24,11 +27,11 @@ type AuditEvent struct {
 	At                    time.Time
 }
 
-const pkgCols = `id, repo_id, filename, name, version, release, arch, sha256, size, added_at, origin_batch_id`
+const pkgCols = `id, repo_id, filename, name, version, release, arch, sha256, size, added_at, origin_batch_id, component, control, md5, sha1`
 
 func scanPkg(row pgx.Row) (Package, error) {
 	var p Package
-	err := row.Scan(&p.ID, &p.RepoID, &p.Filename, &p.Name, &p.Version, &p.Release, &p.Arch, &p.SHA256, &p.Size, &p.AddedAt, &p.OriginBatchID)
+	err := row.Scan(&p.ID, &p.RepoID, &p.Filename, &p.Name, &p.Version, &p.Release, &p.Arch, &p.SHA256, &p.Size, &p.AddedAt, &p.OriginBatchID, &p.Component, &p.Control, &p.MD5, &p.SHA1)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return p, ErrNotFound
 	}
@@ -38,9 +41,9 @@ func scanPkg(row pgx.Row) (Package, error) {
 // AddPackage inserts p (RepoID, Filename, metadata, SHA256, Size set); returns ErrExists on a duplicate filename.
 func (s *Store) AddPackage(ctx context.Context, p Package) (Package, error) {
 	out, err := scanPkg(s.pool.QueryRow(ctx, `
-		INSERT INTO packages(repo_id, filename, name, version, release, arch, sha256, size)
-		VALUES($1,$2,$3,$4,$5,$6,$7,$8) RETURNING `+pkgCols,
-		p.RepoID, p.Filename, p.Name, p.Version, p.Release, p.Arch, p.SHA256, p.Size))
+		INSERT INTO packages(repo_id, filename, name, version, release, arch, sha256, size, component, control, md5, sha1)
+		VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12) RETURNING `+pkgCols,
+		p.RepoID, p.Filename, p.Name, p.Version, p.Release, p.Arch, p.SHA256, p.Size, p.Component, p.Control, p.MD5, p.SHA1))
 	if pgCode(err) == "23505" {
 		return Package{}, ErrExists
 	}
@@ -109,8 +112,9 @@ func (s *Store) AddPackagesAudited(ctx context.Context, repoID int64, pkgs []Pac
 	defer tx.Rollback(ctx)
 	for i, p := range pkgs {
 		_, err := tx.Exec(ctx, `
-			INSERT INTO packages(repo_id, filename, name, version, release, arch, sha256, size, origin_batch_id)
-			VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9)`, repoID, p.Filename, p.Name, p.Version, p.Release, p.Arch, p.SHA256, p.Size, p.OriginBatchID)
+			INSERT INTO packages(repo_id, filename, name, version, release, arch, sha256, size, origin_batch_id, component, control, md5, sha1)
+			VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)`, repoID, p.Filename, p.Name, p.Version, p.Release, p.Arch, p.SHA256, p.Size, p.OriginBatchID,
+			p.Component, p.Control, p.MD5, p.SHA1)
 		if pgCode(err) == "23505" {
 			return ErrExists
 		}
@@ -152,9 +156,9 @@ func (s *Store) AddPackageFirstStage(ctx context.Context, p Package) (Package, e
 		return Package{}, ErrMirrorRepo
 	}
 	out, err := scanPkg(tx.QueryRow(ctx, `
-		INSERT INTO packages(repo_id, filename, name, version, release, arch, sha256, size)
-		VALUES($1,$2,$3,$4,$5,$6,$7,$8) RETURNING `+pkgCols,
-		p.RepoID, p.Filename, p.Name, p.Version, p.Release, p.Arch, p.SHA256, p.Size))
+		INSERT INTO packages(repo_id, filename, name, version, release, arch, sha256, size, component, control, md5, sha1)
+		VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12) RETURNING `+pkgCols,
+		p.RepoID, p.Filename, p.Name, p.Version, p.Release, p.Arch, p.SHA256, p.Size, p.Component, p.Control, p.MD5, p.SHA1))
 	if pgCode(err) == "23505" {
 		return Package{}, ErrExists
 	}

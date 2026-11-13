@@ -17,6 +17,8 @@ import (
 type StagedFile struct {
 	Path, Filename, SHA256 string
 	Size                   int64
+	// Deb only: the upstream component and control stanza (the file's own control data when empty).
+	Component, Control string
 }
 
 // IngestBatch places staged rpms into a first-stage repo as one unit (mirror sync path):
@@ -33,10 +35,23 @@ func (s *Service) IngestBatch(ctx context.Context, slug string, batchID int64, f
 	}
 	defer s.lock(slug)()
 	dir := s.Publisher.RepoDir(slug)
+	isDeb := repo.Kind == store.KindDeb
+	var debCfg store.DebRepo
+	if isDeb {
+		if debCfg, err = s.Store.DebRepoByID(ctx, repo.ID); err != nil {
+			return nil, err
+		}
+	}
 
 	pkgs := make([]store.Package, 0, len(files))
 	for _, f := range files {
-		if !filenameRe.MatchString(f.Filename) {
+		if isDeb != debFilenameRe.MatchString(f.Filename) {
+			if !validPackageFilename(f.Filename) {
+				return nil, ErrBadFilename
+			}
+			return nil, ErrWrongKind
+		}
+		if !isDeb && !filenameRe.MatchString(f.Filename) {
 			return nil, ErrBadFilename
 		}
 		sum, n, err := hashFile(f.Path)
@@ -46,14 +61,20 @@ func (s *Service) IngestBatch(ctx context.Context, slug string, batchID int64, f
 		if sum != f.SHA256 || n != f.Size {
 			return nil, fmt.Errorf("%w: %s", ErrBadChecksum, f.Filename)
 		}
-		meta, err := rpmmeta.Parse(f.Path)
-		if err != nil {
-			return nil, fmt.Errorf("%s: %w", f.Filename, err)
+		var row store.Package
+		if isDeb {
+			if row, err = stagedDebRow(f, debCfg); err != nil {
+				return nil, err
+			}
+		} else {
+			meta, err := rpmmeta.Parse(f.Path)
+			if err != nil {
+				return nil, fmt.Errorf("%s: %w", f.Filename, err)
+			}
+			row = store.Package{Name: meta.Name, Version: meta.Version, Release: meta.Release, Arch: meta.Arch}
 		}
-		pkgs = append(pkgs, store.Package{
-			RepoID: repo.ID, Filename: f.Filename, Name: meta.Name, Version: meta.Version,
-			Release: meta.Release, Arch: meta.Arch, SHA256: sum, Size: n,
-		})
+		row.RepoID, row.Filename, row.SHA256, row.Size = repo.ID, f.Filename, sum, n
+		pkgs = append(pkgs, row)
 	}
 
 	var placed []string

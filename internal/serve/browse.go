@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"html/template"
 	"net/http"
+	"strings"
 
 	"dnfrepo/internal/store"
 )
@@ -34,6 +35,16 @@ func (d Deps) browse(w http.ResponseWriter, r *http.Request, repo store.Repo) {
 		http.Error(w, "internal error", 500)
 		return
 	}
+	data := map[string]any{"Repo": repo, "Packages": pkgs, "BaseURL": d.BaseURL}
+	if repo.Kind == store.KindDeb {
+		cfg, err := d.Store.DebRepoByID(r.Context(), repo.ID)
+		if err != nil {
+			http.Error(w, "internal error", 500)
+			return
+		}
+		data["Deb"] = cfg
+		data["Components"] = strings.Join(cfg.Components, " ")
+	}
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	browseTmpl.Execute(w, map[string]any{"Repo": repo, "Packages": pkgs})
+	browseTmpl.Execute(w, data)
 }

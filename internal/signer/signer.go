@@ -8,6 +8,7 @@ import (
 
 	"github.com/ProtonMail/go-crypto/openpgp"
 	"github.com/ProtonMail/go-crypto/openpgp/armor"
+	"github.com/ProtonMail/go-crypto/openpgp/clearsign"
 	"github.com/ProtonMail/go-crypto/openpgp/packet"
 )
 
@@ -64,6 +65,22 @@ func LoadOrCreate(path string) (*Signer, error) {
 func (s *Signer) SignDetached(data []byte) ([]byte, error) {
 	var out bytes.Buffer
 	if err := openpgp.ArmoredDetachSign(&out, s.entity, bytes.NewReader(data), nil); err != nil {
+		return nil, err
+	}
+	return out.Bytes(), nil
+}
+
+// ClearSign returns data as a cleartext-signed message (apt's InRelease form).
+func (s *Signer) ClearSign(data []byte) ([]byte, error) {
+	var out bytes.Buffer
+	w, err := clearsign.Encode(&out, s.entity.PrivateKey, nil)
+	if err != nil {
+		return nil, err
+	}
+	if _, err := w.Write(data); err != nil {
+		return nil, err
+	}
+	if err := w.Close(); err != nil {
 		return nil, err
 	}
 	return out.Bytes(), nil

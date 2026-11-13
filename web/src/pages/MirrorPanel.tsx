@@ -10,7 +10,7 @@ const lines = (s: string) => s.split(/[\s,]+/).filter(Boolean)
 const defaultSchedule = (): MirrorSchedule => ({ frequency: 'manual', time_of_day: '02:00', timezone: browserTZ(), weekdays: [], day_of_month: 1, paused: false })
 
 /** Upstream, credentials, signature, filters and schedule form. `next` is the next stage's name, if any. */
-export default function MirrorPanel({ slug, next, onChanged }: { slug: string; next?: string; onChanged: () => void }) {
+export default function MirrorPanel({ slug, deb = false, next, onChanged }: { slug: string; deb?: boolean; next?: string; onChanged: () => void }) {
   const [m, setM] = useState<Mirror | null>(null) // null = not configured yet
   const [batches, setBatches] = useState<Batch[]>([])
   const [ready, setReady] = useState(false)
@@ -32,6 +32,8 @@ export default function MirrorPanel({ slug, next, onChanged }: { slug: string; n
   const [gpg, setGpg] = useState('')
   const [reqSig, setReqSig] = useState(false)
   const [arches, setArches] = useState('')
+  const [suite, setSuite] = useState('')
+  const [components, setComponents] = useState('main')
   const [include, setInclude] = useState('')
   const [exclude, setExclude] = useState('')
   const [keepLatest, setKeepLatest] = useState(0)
@@ -44,6 +46,7 @@ export default function MirrorPanel({ slug, next, onChanged }: { slug: string; n
 
   const fill = (c: Mirror) => {
     setUrl(c.upstream_url); setUser(c.username); setGpg(c.gpg_key); setReqSig(c.require_signature)
+    setSuite(c.suite ?? ''); setComponents((c.components ?? ['main']).join(' '))
     setArches(c.arches.join(' ')); setInclude(c.include.join(' ')); setExclude(c.exclude.join(' '))
     setKeepLatest(c.keep_latest); setSched({ ...defaultSchedule(), ...c.schedule, weekdays: c.schedule.weekdays ?? [] })
   }
@@ -86,7 +89,8 @@ export default function MirrorPanel({ slug, next, onChanged }: { slug: string; n
       gpg_key: gpg, require_signature: reqSig, arches: lines(arches), include: lines(include), exclude: lines(exclude),
       keep_latest: keepLatest, schedule: sched,
     }
-    if (src === 'url') body.upstream_url = url
+    if (deb) { body.suite = suite; body.components = lines(components) }
+    if (src === 'url' || deb) body.upstream_url = url
     else {
       body.repo_file = repoFile
       if (section) body.section = section
@@ -162,19 +166,25 @@ export default function MirrorPanel({ slug, next, onChanged }: { slug: string; n
       <form className="card" onSubmit={save}>
         <fieldset>
           <legend>Upstream</legend>
-          <div className="row">
+          {!deb && <div className="row">
             <label className="inline"><input type="radio" name="src" checked={src === 'url'} onChange={() => setSrc('url')} /> Repo URL</label>
             <label className="inline"><input type="radio" name="src" checked={src === 'file'} onChange={() => setSrc('file')} /> Paste a .repo file</label>
-          </div>
-          {src === 'url' ? (
-            <label>Upstream URL<input value={url} onChange={(e) => setUrl(e.target.value)} placeholder="https://pkgs.example.org/el9/x86_64/" required /></label>
+          </div>}
+          {src === 'url' || deb ? (
+            <label>Upstream URL<input value={url} onChange={(e) => setUrl(e.target.value)} placeholder={deb ? 'https://deb.debian.org/debian/' : 'https://pkgs.example.org/el9/x86_64/'} required /></label>
           ) : (
             <>
               <label>.repo file<textarea rows={6} value={repoFile} onChange={(e) => setRepoFile(e.target.value)} required /></label>
               <button type="button" onClick={parse} disabled={!repoFile.trim()}>Read .repo file</button>
             </>
           )}
-          {src === 'file' && sectionOpts.length > 1 && (
+          {deb && (
+            <div className="row">
+              <label>Suite<input value={suite} onChange={(e) => setSuite(e.target.value)} placeholder="bookworm" required /></label>
+              <label>Components<input value={components} onChange={(e) => setComponents(e.target.value)} placeholder="main contrib" required /></label>
+            </div>
+          )}
+          {src === 'file' && !deb && sectionOpts.length > 1 && (
             <label>Section
               <select value={section} onChange={(e) => setSection(e.target.value)}>
                 {sectionOpts.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
@@ -207,7 +217,7 @@ export default function MirrorPanel({ slug, next, onChanged }: { slug: string; n
         <fieldset>
           <legend>Filters</legend>
           <div className="row">
-            <label>Arches<input value={arches} onChange={(e) => setArches(e.target.value)} placeholder="x86_64 noarch" /></label>
+            <label>Arches<input value={arches} onChange={(e) => setArches(e.target.value)} placeholder={deb ? 'amd64 arm64' : 'x86_64 noarch'} required={deb} /></label>
             <label>Include (name globs)<input value={include} onChange={(e) => setInclude(e.target.value)} /></label>
             <label>Exclude (name globs)<input value={exclude} onChange={(e) => setExclude(e.target.value)} /></label>
             <label>Keep latest (0 = all)<input type="number" min={0} value={keepLatest} onChange={(e) => setKeepLatest(Math.max(0, Number(e.target.value) || 0))} /></label>

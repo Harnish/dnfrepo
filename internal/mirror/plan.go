@@ -6,6 +6,7 @@ import (
 	"path"
 	"sort"
 
+	"dnfrepo/internal/debver"
 	"dnfrepo/internal/rpmver"
 	"dnfrepo/internal/store"
 )
@@ -16,7 +17,12 @@ import (
 type Filter struct {
 	Arches, Include, Exclude []string
 	KeepLatest               int
+	// Compare orders two versions (version, release pairs); nil means rpm ordering.
+	Compare func(verA, relA, verB, relB string) int
 }
+
+// debCompare orders deb versions; deb rows keep the whole version (epoch and revision) in Version.
+func debCompare(verA, _, verB, _ string) int { return debver.Compare(verA, verB) }
 
 var ErrConflict = errors.New("upstream file has a different checksum than the repo's file of the same name")
 
@@ -48,9 +54,13 @@ func Plan(up []UpstreamPkg, have []store.Package, f Filter, repoKeep int, overri
 		k := [2]string{p.Name, p.Arch}
 		groups[k] = append(groups[k], p)
 	}
+	cmp := f.Compare
+	if cmp == nil {
+		cmp = rpmver.ComparePackage
+	}
 	var cands []UpstreamPkg
 	for _, p := range up {
-		if len(f.Arches) > 0 && p.Arch != "noarch" && !contains(f.Arches, p.Arch) {
+		if len(f.Arches) > 0 && p.Arch != "noarch" && p.Arch != "all" && !contains(f.Arches, p.Arch) {
 			continue
 		}
 		if len(f.Include) > 0 {
@@ -91,7 +101,7 @@ func Plan(up []UpstreamPkg, have []store.Package, f Filter, repoKeep int, overri
 			limit = len(g)
 		}
 		sort.Slice(g, func(i, j int) bool { // newest first
-			if c := rpmver.ComparePackage(g[i].Version, g[i].Release, g[j].Version, g[j].Release); c != 0 {
+			if c := cmp(g[i].Version, g[i].Release, g[j].Version, g[j].Release); c != 0 {
 				return c > 0
 			}
 			_, ih := haveSum[g[i].Filename]

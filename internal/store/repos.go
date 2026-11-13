@@ -42,15 +42,16 @@ type Repo struct {
 	Slug, Name string
 	Mode       AccessMode
 	PreviousID *int64
-	Keep       int // default max versions kept per package name+arch; 0 = unlimited
+	Keep       int    // default max versions kept per package name+arch; 0 = unlimited
+	Kind       string // KindRPM or KindDeb; fixed at creation
 }
 
-const repoCols = `id, slug, name, mode, previous_id, keep`
+const repoCols = `id, slug, name, mode, previous_id, keep, kind`
 
 func scanRepo(row pgx.Row) (Repo, error) {
 	var r Repo
 	var mode string
-	err := row.Scan(&r.ID, &r.Slug, &r.Name, &mode, &r.PreviousID, &r.Keep)
+	err := row.Scan(&r.ID, &r.Slug, &r.Name, &mode, &r.PreviousID, &r.Keep, &r.Kind)
 	r.Mode = AccessMode(mode)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return r, ErrNotFound
@@ -66,15 +67,29 @@ func pgCode(err error) string {
 	return ""
 }
 
+type queryRower interface {
+	QueryRow(ctx context.Context, sql string, args ...any) pgx.Row
+}
+
 func (s *Store) CreateRepo(ctx context.Context, slug, name string, mode AccessMode, previousID *int64) (Repo, error) {
+	return s.createRepo(ctx, s.pool, KindRPM, slug, name, mode, previousID)
+}
+
+func (s *Store) createRepo(ctx context.Context, q queryRower, kind, slug, name string, mode AccessMode, previousID *int64) (Repo, error) {
 	if !ValidSlug(slug) {
 		return Repo{}, ErrBadSlug
 	}
 	if !mode.Valid() {
 		return Repo{}, fmt.Errorf("invalid mode %q", mode)
 	}
-	r, err := scanRepo(s.pool.QueryRow(ctx,
-		`INSERT INTO repos(slug,name,mode,previous_id) VALUES($1,$2,$3,$4) RETURNING `+repoCols, slug, name, string(mode), previousID))
+	if previousID != nil { // a pipeline never mixes rpm and deb repos
+		var pk string
+		if err := q.QueryRow(ctx, `SELECT kind FROM repos WHERE id=$1`, *previousID).Scan(&pk); err == nil && pk != kind {
+			return Repo{}, ErrChain
+		}
+	}
+	r, err := scanRepo(q.QueryRow(ctx,
+		`INSERT INTO repos(slug,name,mode,previous_id,kind) VALUES($1,$2,$3,$4,$5) RETURNING `+repoCols, slug, name, string(mode), previousID, kind))
 	switch pgCode(err) {
 	case "23505": // unique: slug taken, or previous already has a next
 		if previousID != nil {
@@ -172,6 +187,13 @@ func (s *Store) SetPrevious(ctx context.Context, id int64, previousID *int64) er
 		}
 		if n > 0 {
 			return ErrHasContent
+		}
+		var k1, k2 string
+		if err := tx.QueryRow(ctx, `SELECT (SELECT kind FROM repos WHERE id=$1), (SELECT kind FROM repos WHERE id=$2)`, id, *previousID).Scan(&k1, &k2); err != nil {
+			return ErrChain
+		}
+		if k1 != k2 {
+			return ErrChain // a pipeline never mixes rpm and deb repos
 		}
 		// walk up from the candidate; reaching id means a cycle
 		for cur := previousID; cur != nil; {

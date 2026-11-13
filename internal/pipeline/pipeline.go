@@ -78,12 +78,22 @@ func (s *Service) Rebuild(ctx context.Context, slug string) error {
 }
 
 func (s *Service) Upload(ctx context.Context, slug, filename string, r io.Reader, actor string) (store.Package, error) {
-	if !filenameRe.MatchString(filename) {
+	if !validPackageFilename(filename) {
 		return store.Package{}, ErrBadFilename
 	}
 	repo, err := s.Store.RepoBySlug(ctx, slug)
 	if err != nil {
 		return store.Package{}, err
+	}
+	isDeb := repo.Kind == store.KindDeb
+	if isDeb != debFilenameRe.MatchString(filename) {
+		return store.Package{}, ErrWrongKind
+	}
+	var debCfg store.DebRepo
+	if isDeb {
+		if debCfg, err = s.Store.DebRepoByID(ctx, repo.ID); err != nil {
+			return store.Package{}, err
+		}
 	}
 	if repo.PreviousID != nil {
 		return store.Package{}, ErrNotFirstStage
@@ -112,9 +122,17 @@ func (s *Service) Upload(ctx context.Context, slug, filename string, r io.Reader
 	if n > s.MaxBytes {
 		return store.Package{}, ErrTooLarge
 	}
-	meta, err := rpmmeta.Parse(tmp.Name())
-	if err != nil {
-		return store.Package{}, err
+	var row store.Package
+	if isDeb {
+		if row, err = debRow(tmp.Name(), filename, debCfg); err != nil {
+			return store.Package{}, err
+		}
+	} else {
+		meta, err := rpmmeta.Parse(tmp.Name())
+		if err != nil {
+			return store.Package{}, err
+		}
+		row = store.Package{Name: meta.Name, Version: meta.Version, Release: meta.Release, Arch: meta.Arch}
 	}
 	if err := os.Chmod(tmp.Name(), 0o644); err != nil {
 		return store.Package{}, err
@@ -129,10 +147,8 @@ func (s *Service) Upload(ctx context.Context, slug, filename string, r io.Reader
 			return store.Package{}, err
 		}
 	}
-	pkg, err := s.Store.AddPackageFirstStage(ctx, store.Package{
-		RepoID: repo.ID, Filename: filename, Name: meta.Name, Version: meta.Version,
-		Release: meta.Release, Arch: meta.Arch, SHA256: sum, Size: n,
-	})
+	row.RepoID, row.Filename, row.SHA256, row.Size = repo.ID, filename, sum, n
+	pkg, err := s.Store.AddPackageFirstStage(ctx, row)
 	if err != nil {
 		os.Remove(final)
 		if errors.Is(err, store.ErrLaterStage) {
@@ -151,7 +167,7 @@ func (s *Service) Upload(ctx context.Context, slug, filename string, r io.Reader
 }
 
 func (s *Service) Delete(ctx context.Context, slug, filename, actor string) error {
-	if !filenameRe.MatchString(filename) {
+	if !validPackageFilename(filename) {
 		return ErrBadFilename
 	}
 	defer s.lock(slug)()
@@ -193,7 +209,7 @@ func (s *Service) QuarantineOrphans(ctx context.Context, slug string) ([]string,
 			os.Remove(filepath.Join(dir, name))
 			continue
 		}
-		if !filenameRe.MatchString(name) {
+		if !validPackageFilename(name) {
 			continue
 		}
 		if _, err := s.Store.PackageByFilename(ctx, repo.ID, name); err == nil {

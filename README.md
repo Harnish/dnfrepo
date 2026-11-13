@@ -10,6 +10,7 @@ A web service that manages signed dnf/yum repositories: upload rpms or pull them
 - **Sources** (first stage only): GitHub latest-release rpm (`owner/name`) and Plex Media Server, checked daily or on demand.
 - **Retention:** per repo, keep only the newest N versions of each package (default limit plus per-package overrides; 0 = unlimited). Packages are grouped by name and arch and ordered with rpm's version comparison. Enforced after every upload or promotion into the repo and when the limits are saved; each stage has its own limits.
 - **Mirrors:** a repo can mirror an upstream dnf repo (see below).
+- **apt/deb repos:** a repo can be of kind `deb` instead of `rpm`: upload `.deb` files (or GitHub release `.deb` assets), promote them through stages, or mirror a Debian/Ubuntu suite. See "apt/deb repos" below.
 - **Dedup:** identical rpms (same sha256 and size) share one file through hardlinks, so the same package in several repos or stages costs disk once. Set `DEDUP=true` to link new uploads, mirror syncs and sources as they arrive, and call `POST /api/dedup` to merge duplicates already on disk. Needs one filesystem for all repos.
 - Browse page, `<slug>.repo` file and RSS feed per repo, all under that repo's access rule.
 - React admin UI and a JSON API under `/api`.
@@ -68,7 +69,28 @@ A mirror is an empty first-stage repo that copies an upstream dnf repo. Give it 
 - **Disk:** the mirror's size and the staging directory (`<DATA_DIR>/mirror-staging`) are the operator's concern. Staging is not cleaned up automatically. Internal and private upstream URLs are allowed (admins are trusted).
 - **Editing:** saving replaces every field except the credentials. Incremental `createrepo_c --update` exists but is off (no measured speedup). Frozen snapshot URLs are not supported yet (see `docs/TODO.md`).
 
-## Client setup
+## apt/deb repos
+
+Pick **deb (apt)** when creating a repo (API: `kind:"deb"`). A deb repo has one **suite** (default: the slug), one or more **components** (default `main`, fixed at creation) and **architectures** (default `amd64 arm64`, at least one real one). Packages of arch `all` appear in every arch's index. The kind cannot change, and a pipeline never mixes rpm and deb repos.
+
+- **Own packages:** upload `.deb` files to a first-stage repo. The filename must be `<Package>_<version without epoch>_<Arch>.deb`; the control data inside the file is authoritative. GitHub release `.deb` assets work as sources; Plex is rpm-only.
+- **Promotion:** a package can only be promoted into a deb stage that accepts its component and architecture (`all` always passes); otherwise the whole promotion is rejected with 409. Suite names may differ per stage.
+- **Retention:** per (name, arch) with dpkg version ordering.
+- **Mirrors:** a mirror of a Debian/Ubuntu suite takes the archive base URL, suite, components and architectures, and optionally an armored GPG key (with `require_signature`). It verifies `InRelease`, or `Release` plus `Release.gpg` (one valid signature from any key in the file suffices), and checks each index and package against the hashes in `Release`. Signed-by-this-server metadata replaces the upstream signatures, as for rpm mirrors.
+- **Metadata:** `Packages`, `Packages.gz`, `Release`, `Release.gpg` and `InRelease` are generated in pure Go and swapped atomically (`dists.<gen>/` plus a symlink). `Release` has no `Valid-Until`. Changing a repo's architectures affects only future uploads, promotions and indexing.
+- **Not supported:** `Sources`, `Contents`, `by-hash`, i18n translations, `.udeb`.
+
+Client setup:
+
+```
+curl -fsS https://repo.example.org/gpg.key | sudo tee /etc/apt/keyrings/dnfrepo.asc
+echo "deb [signed-by=/etc/apt/keyrings/dnfrepo.asc] https://repo.example.org/r/<slug>/ <suite> main" | sudo tee /etc/apt/sources.list.d/<slug>.list
+sudo apt update
+```
+
+The repo's browse page shows the exact lines. `users`-mode repos need an `/etc/apt/auth.conf.d/` entry with the repo user and token.
+
+## Client setup (rpm)
 
 ```
 sudo dnf config-manager addrepo --from-repofile=https://repo.example.org/r/<slug>/<slug>.repo
