@@ -27,6 +27,17 @@ docker run -d --name dnfrepo -p 8080:8080 -v dnfrepo-data:/data \
   dnfrepo
 ```
 
+### Kubernetes (Helm)
+
+`charts/dnfrepo` deploys the image from `ghcr.io/harnish/dnfrepo` (override `image.repository`/`image.tag`). Create the secrets first (`dnfrepo-secrets` with `DATABASE_URL`, `dnfrepo-oidc` with `OIDC_CLIENT_ID`/`OIDC_CLIENT_SECRET`; names and keys are values), then:
+
+```
+helm install dnfrepo charts/dnfrepo --set baseURL=https://repo.example.org \
+  --set oidc.issuer=https://auth.example.org/application/o/dnfrepo/ --set ingress.enabled=true --set ingress.host=repo.example.org
+```
+
+One replica with a `Recreate` strategy, since `/data` cannot be shared. Data uses a PVC by default; set `persistence.existingClaim` or `persistence.hostPath` instead. Optional secrets (`adminEmail`/`adminPassword`, `secretKey`) are enabled by giving their `name`.
+
 Admins sign in through OpenID Connect (built for Authentik). Only members of the `OIDC_ADMIN_GROUP` group can get in; the group is checked at login, so removing someone takes effect when their session expires (12 hours).
 
 Authentik setup: create an OAuth2/OpenID Provider (confidential client) with redirect URI `<BASE_URL>/api/auth/oidc/callback` and scopes `openid email profile`, bind it to an Application, and create the admin group (default name `dnfrepo-admins`). The ID token must carry a `groups` claim; Authentik's default `profile` scope mapping provides it. The provider is contacted on first login, not at boot, so repo serving keeps working while Authentik is down (admin login returns 503 until it's back).

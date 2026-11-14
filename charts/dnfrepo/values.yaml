@@ -1,0 +1,54 @@
+image:
+  repository: ghcr.io/harnish/dnfrepo
+  tag: ""            # defaults to the chart appVersion
+  pullPolicy: IfNotPresent
+imagePullSecrets: []
+
+# Public URL of the service (used in .repo files, sources.list lines and the OIDC redirect).
+baseURL: https://repo.example.org
+# CIDRs of the reverse proxy / ingress controller; required for ips-mode repos behind a proxy.
+trustedProxies: ""
+dedup: false
+
+oidc:
+  issuer: https://auth.example.org/application/o/dnfrepo/
+  adminGroup: ""     # empty keeps the app default (dnfrepo-admins)
+
+# Secrets are never created by this chart; create them first and reference them here.
+secrets:
+  database: { name: dnfrepo-secrets, key: DATABASE_URL }
+  oidcClientId: { name: dnfrepo-oidc, key: OIDC_CLIENT_ID }
+  oidcClientSecret: { name: dnfrepo-oidc, key: OIDC_CLIENT_SECRET }
+  # Optional local admin sign-in; set name to "" to disable.
+  adminEmail: { name: "", key: ADMIN_EMAIL }
+  adminPassword: { name: "", key: ADMIN_PASSWORD }
+  # Optional key that seals upstream mirror credentials (SECRET_KEY); name "" to disable.
+  secretKey: { name: "", key: SECRET_KEY }
+
+extraEnv: []         # extra container env entries (full k8s env syntax)
+
+persistence:
+  size: 20Gi
+  storageClass: ""
+  existingClaim: ""  # use an existing PVC instead of creating one
+  hostPath: ""       # or mount a host directory (single-node clusters)
+
+service:
+  port: 80
+
+ingress:
+  enabled: false
+  className: ""
+  annotations: {}
+  host: repo.example.org
+  tlsSecret: ""
+
+resources: {}
+nodeSelector: {}
+tolerations: []
+affinity: {}
+# Must own the data volume. The image user is 10001; hostPath setups usually need the host owner.
+podSecurityContext:
+  runAsUser: 10001
+  runAsGroup: 10001
+  fsGroup: 10001

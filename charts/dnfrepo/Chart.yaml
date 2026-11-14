@@ -1,0 +1,6 @@
+apiVersion: v2
+name: dnfrepo
+description: Signed dnf/yum and apt/deb repository manager with an admin UI
+type: application
+version: 0.1.0
+appVersion: "latest"

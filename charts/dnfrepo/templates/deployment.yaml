@@ -1,0 +1,76 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ .Release.Name }}
+  labels: {{- include "dnfrepo.labels" . | nindent 4 }}
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate # /data (packages, metadata, GPG key) must not be shared by two pods
+  selector:
+    matchLabels: {{- include "dnfrepo.labels" . | nindent 6 }}
+  template:
+    metadata:
+      labels: {{- include "dnfrepo.labels" . | nindent 8 }}
+    spec:
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets: {{- toYaml . | nindent 8 }}
+      {{- end }}
+      securityContext: {{- toYaml .Values.podSecurityContext | nindent 8 }}
+      containers:
+        - name: dnfrepo
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag | default .Chart.AppVersion }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          ports:
+            - containerPort: 8080
+          env:
+            - { name: BASE_URL, value: {{ .Values.baseURL | quote }} }
+            - { name: OIDC_ISSUER, value: {{ .Values.oidc.issuer | quote }} }
+            - { name: DEDUP, value: {{ .Values.dedup | quote }} }
+            {{- if .Values.trustedProxies }}
+            - { name: TRUSTED_PROXIES, value: {{ .Values.trustedProxies | quote }} }
+            {{- end }}
+            {{- if .Values.oidc.adminGroup }}
+            - { name: OIDC_ADMIN_GROUP, value: {{ .Values.oidc.adminGroup | quote }} }
+            {{- end }}
+            {{- include "dnfrepo.secretEnv" (dict "root" . "key" "database" "env" "DATABASE_URL") | nindent 12 }}
+            {{- include "dnfrepo.secretEnv" (dict "root" . "key" "oidcClientId" "env" "OIDC_CLIENT_ID") | nindent 12 }}
+            {{- include "dnfrepo.secretEnv" (dict "root" . "key" "oidcClientSecret" "env" "OIDC_CLIENT_SECRET") | nindent 12 }}
+            {{- include "dnfrepo.secretEnv" (dict "root" . "key" "adminEmail" "env" "ADMIN_EMAIL") | nindent 12 }}
+            {{- include "dnfrepo.secretEnv" (dict "root" . "key" "adminPassword" "env" "ADMIN_PASSWORD") | nindent 12 }}
+            {{- include "dnfrepo.secretEnv" (dict "root" . "key" "secretKey" "env" "SECRET_KEY") | nindent 12 }}
+            {{- with .Values.extraEnv }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
+          volumeMounts:
+            - { name: data, mountPath: /data }
+          readinessProbe:
+            httpGet: { path: /healthz, port: 8080 }
+            initialDelaySeconds: 3
+            periodSeconds: 10
+          livenessProbe:
+            httpGet: { path: /healthz, port: 8080 }
+            initialDelaySeconds: 10
+            periodSeconds: 20
+          {{- with .Values.resources }}
+          resources: {{- toYaml . | nindent 12 }}
+          {{- end }}
+      volumes:
+        - name: data
+          {{- if .Values.persistence.hostPath }}
+          hostPath:
+            path: {{ .Values.persistence.hostPath }}
+            type: Directory
+          {{- else }}
+          persistentVolumeClaim:
+            claimName: {{ .Values.persistence.existingClaim | default (printf "%s-data" .Release.Name) }}
+          {{- end }}
+      {{- with .Values.nodeSelector }}
+      nodeSelector: {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.tolerations }}
+      tolerations: {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.affinity }}
+      affinity: {{- toYaml . | nindent 8 }}
+      {{- end }}
