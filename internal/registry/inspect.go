@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/distribution/distribution/v3"
+	"github.com/distribution/distribution/v3/registry/storage/driver"
 	"github.com/distribution/reference"
 	digest "github.com/opencontainers/go-digest"
 	v1 "github.com/opencontainers/image-spec/specs-go/v1"
@@ -37,14 +38,17 @@ type Tag struct {
 	Layers  []Layer
 }
 
-// Repos lists every image repository in storage, sorted.
+// Repos lists every image repository in storage, sorted. A registry nothing was ever pushed
+// to has none.
 func (r *Registry) Repos(ctx context.Context) ([]string, error) {
 	en, ok := r.ns.(distribution.RepositoryEnumerator)
 	if !ok {
 		return nil, fmt.Errorf("registry namespace cannot enumerate")
 	}
 	var names []string
-	if err := en.Enumerate(ctx, func(n string) error { names = append(names, n); return nil }); err != nil {
+	err := en.Enumerate(ctx, func(n string) error { names = append(names, n); return nil })
+	var nf driver.PathNotFoundError
+	if err != nil && !errors.As(err, &nf) {
 		return nil, err
 	}
 	sort.Strings(names)

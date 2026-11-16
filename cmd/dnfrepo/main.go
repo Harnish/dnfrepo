@@ -11,12 +11,14 @@ import (
 	"syscall"
 	"time"
 
+	"dnfrepo/internal/access"
 	"dnfrepo/internal/adminauth"
 	"dnfrepo/internal/api"
 	"dnfrepo/internal/config"
 	"dnfrepo/internal/mirror"
 	"dnfrepo/internal/pipeline"
 	"dnfrepo/internal/publish"
+	"dnfrepo/internal/registry"
 	"dnfrepo/internal/secretbox"
 	"dnfrepo/internal/serve"
 	"dnfrepo/internal/signer"
@@ -95,7 +97,21 @@ func main() {
 	syncer.Start(ctx)
 
 	actor := func(r *http.Request) string { e, _ := admin.Authenticate(r); return e }
+	var regAPI *api.RegistryAPI
+	var v2 http.Handler
+	if cfg.RegistryDir != "" {
+		pol := &registry.Policy{Store: st, Trusted: cfg.TrustedProxies, Throttle: access.NewThrottle()}
+		reg, err := registry.New(ctx, registry.Config{Root: cfg.RegistryDir, Policy: pol})
+		if err != nil {
+			log.Fatalf("registry: %v", err)
+		}
+		regAPI = &api.RegistryAPI{Store: st, Reg: reg, Policy: pol, Actor: actor, PublicHost: cfg.RegistryHost}
+		v2 = reg.FrontHandler()
+		log.Printf("container registry enabled (data %s)", cfg.RegistryDir)
+	}
 	handler := api.Router(api.Deps{
+		Registry:  regAPI,
+		V2:        v2,
 		Admin:     admin,
 		Repos:     &api.Repos{Store: st, DataDir: cfg.DataDir, OnChange: rebuild},
 		RepoUsers: &api.RepoUsers{Store: st},

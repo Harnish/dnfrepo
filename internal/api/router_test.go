@@ -20,13 +20,16 @@ import (
 	"dnfrepo/internal/store/storetest"
 )
 
-func routerEnv(t *testing.T) (*env, http.Handler, string) {
+func routerEnv(t *testing.T) (*env, http.Handler, string) { return routerEnvWith(t, nil) }
+
+// routerEnvWith is routerEnv with a chance to adjust the Deps (e.g. mount a registry stub).
+func routerEnvWith(t *testing.T, tweak func(*Deps)) (*env, http.Handler, string) {
 	t.Helper()
 	e := newEnv(t)
 	dir := t.TempDir()
 	actor := func(r *http.Request) string { em, _ := e.Admin.Authenticate(r); return em }
 	pl := &pipeline.Service{Store: e.St, Publisher: nopPub{dir}, MaxBytes: 1 << 20}
-	h := Router(Deps{
+	d := Deps{
 		Admin:     e.Admin,
 		Repos:     &Repos{Store: e.St, DataDir: dir},
 		RepoUsers: &RepoUsers{Store: e.St},
@@ -39,8 +42,11 @@ func routerEnv(t *testing.T) (*env, http.Handler, string) {
 			"index.html":    {Data: []byte("<html>SPA</html>")},
 			"assets/app.js": {Data: []byte("console.log(1)")},
 		},
-	})
-	return e, h, dir
+	}
+	if tweak != nil {
+		tweak(&d)
+	}
+	return e, Router(d), dir
 }
 
 func call(h http.Handler, method, path string, e *env, csrf bool) *httptest.ResponseRecorder {
@@ -183,5 +189,37 @@ func TestBearerTokenSkipsCSRFHeaderAndReachesAdminAPI(t *testing.T) {
 	h.ServeHTTP(w, r)
 	if w.Code != 401 {
 		t.Fatalf("bad bearer: %d", w.Code)
+	}
+}
+
+func TestRouterV2DoesNotShadowOthers(t *testing.T) {
+	_, h, _ := routerEnvWith(t, func(d *Deps) {
+		d.V2 = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { w.Write([]byte("REGISTRY " + r.URL.Path)) })
+	})
+	for path, want := range map[string]string{
+		"/v2/":                     "REGISTRY /v2/",
+		"/v2/a/b/manifests/latest": "REGISTRY /v2/a/b/manifests/latest",
+		"/healthz":                 "ok",
+		"/":                        "SPA",
+		"/some/spa/route":          "SPA",
+		"/gpg.key":                 "KEY",
+	} {
+		w := call(h, "GET", path, nil, false)
+		if !strings.Contains(w.Body.String(), want) {
+			t.Errorf("%s: %d %q want %q", path, w.Code, w.Body, want)
+		}
+	}
+	if w := call(h, "GET", "/api/auth/methods", nil, false); w.Code != 200 {
+		t.Errorf("/api/auth/methods: %d", w.Code)
+	}
+	if w := call(h, "GET", "/api/repos", nil, false); w.Code != 401 {
+		t.Errorf("admin API must still need a session: %d", w.Code)
+	}
+}
+
+func TestRouterWithoutRegistryServesSPAForV2(t *testing.T) {
+	_, h, _ := routerEnv(t)
+	if w := call(h, "GET", "/v2/", nil, false); !strings.Contains(w.Body.String(), "SPA") {
+		t.Fatalf("%d %q", w.Code, w.Body)
 	}
 }

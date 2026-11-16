@@ -4,6 +4,7 @@ package config
 import (
 	"fmt"
 	"net/netip"
+	"net/url"
 	"strconv"
 	"strings"
 	"time"
@@ -21,6 +22,8 @@ type Config struct {
 	SecretKey                                 string        // optional; seals upstream credentials
 	RebuildTimeout                            time.Duration // metadata rebuild timeout
 	Dedup                                     bool          // hardlink identical rpms on ingest
+	RegistryDir                               string        // REGISTRY_DIR: container registry data dir; empty disables the registry
+	RegistryHost                              string        // host in pull commands (REGISTRY_HOST; default: host of BASE_URL)
 }
 
 func Load(getenv func(string) string) (Config, error) {
@@ -88,6 +91,13 @@ func Load(getenv func(string) string) (Config, error) {
 			return c, fmt.Errorf("DEDUP: %w", err)
 		}
 		c.Dedup = b
+	}
+	c.RegistryDir = getenv("REGISTRY_DIR")
+	c.RegistryHost = getenv("REGISTRY_HOST")
+	if c.RegistryHost == "" {
+		if u, err := url.Parse(c.BaseURL); err == nil {
+			c.RegistryHost = u.Host
+		}
 	}
 	for _, p := range strings.Split(getenv("TRUSTED_PROXIES"), ",") {
 		if p = strings.TrimSpace(p); p == "" {

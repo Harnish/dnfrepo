@@ -8,8 +8,6 @@ import (
 	"sort"
 	"strconv"
 
-	"github.com/distribution/distribution/v3"
-
 	"dnfrepo/internal/store"
 )
 
@@ -22,6 +20,11 @@ func (r *Registry) FrontHandler() http.Handler {
 		if req.URL.Path == "/v2/_catalog" && (req.Method == http.MethodGet || req.Method == http.MethodHead) {
 			r.serveCatalog(w, req)
 			return
+		}
+		if req.URL.Path == "/v2/" {
+			// Anonymous pulls work, but say that credentials are understood so clients that
+			// probe /v2/ first (podman, docker) send them on the requests that need them.
+			w.Header().Set("WWW-Authenticate", `Basic realm="dnfrepo registry"`)
 		}
 		if req.Method != http.MethodGet && req.Method != http.MethodHead {
 			if !r.gate.Begin() {
@@ -43,19 +46,10 @@ func (r *Registry) visibleRepos(req *http.Request) ([]string, Verdict, error) {
 	if v != Allow {
 		return nil, v, nil
 	}
-	en, ok := r.ns.(distribution.RepositoryEnumerator)
-	if !ok {
-		return nil, Error, fmt.Errorf("registry namespace cannot enumerate")
-	}
-	var names []string
-	err := en.Enumerate(req.Context(), func(name string) error {
-		names = append(names, name)
-		return nil
-	})
+	names, err := r.Repos(req.Context())
 	if err != nil {
 		return nil, Error, err
 	}
-	sort.Strings(names)
 	var out []string
 	for _, n := range names {
 		if c.Push {

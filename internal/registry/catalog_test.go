@@ -1,11 +1,13 @@
 package registry
 
 import (
+	"context"
 	"encoding/json"
 	"net/netip"
 	"net/url"
 	"regexp"
 	"strconv"
+	"strings"
 	"testing"
 	"time"
 
@@ -159,4 +161,26 @@ func TestGateWaitsForInflight(t *testing.T) {
 		t.Fatal("reopened gate refused a write")
 	}
 	g.End()
+}
+
+func TestEmptyRegistryListsNothing(t *testing.T) {
+	r := newTestReg(t)
+	for _, c := range [][2]string{{"", ""}, {"ci", "ptok"}} {
+		if got, link := catalog(t, r, c[0], c[1], ""); len(got) != 0 || link != "" {
+			t.Fatalf("%v %q", got, link)
+		}
+	}
+	if names, err := r.Reg.Repos(context.Background()); err != nil || len(names) != 0 {
+		t.Fatalf("%v %v", names, err)
+	}
+}
+
+// Clients such as podman probe /v2/ once and only send credentials when it advertises Basic;
+// without the header an authenticated push never authenticates. Anonymous pulls still work.
+func TestBaseAdvertisesBasicChallengeButStaysOpen(t *testing.T) {
+	r := newTestReg(t)
+	resp, _ := do(t, "GET", r.Srv.URL+"/v2/", "", "", nil, nil)
+	if resp.StatusCode != 200 || !strings.HasPrefix(resp.Header.Get("WWW-Authenticate"), "Basic ") {
+		t.Fatalf("%d %q", resp.StatusCode, resp.Header.Get("WWW-Authenticate"))
+	}
 }
