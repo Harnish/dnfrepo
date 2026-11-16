@@ -1,15 +1,23 @@
 import { describe, expect, it } from 'vitest'
-import { archLabel, pullCommand, sortTags, type RegistryTag } from './registry'
+import { archLabel, isOpenPath, pullCommand, sortTags, type RegistryTag } from './registry'
 
 const tag = (name: string, created: string | null): RegistryTag =>
   ({ name, digest: 'sha256:' + name, size: 1, created, arches: [], layers: [], pull: '' })
 
 describe('pullCommand', () => {
-  it('builds docker pull for nested names', () => {
-    expect(pullCommand('reg.example.org', 'a/b/c', 'v1')).toBe('docker pull reg.example.org/a/b/c:v1')
+  it('formats the server-provided reference, nested names and ports included', () => {
+    expect(pullCommand('reg.example.org/a/b/c:v1')).toBe('docker pull reg.example.org/a/b/c:v1')
+    expect(pullCommand('localhost:8080/app:latest')).toBe('docker pull localhost:8080/app:latest')
   })
-  it('keeps a registry port', () => {
-    expect(pullCommand('localhost:8080', 'app', 'latest')).toBe('docker pull localhost:8080/app:latest')
+})
+
+describe('isOpenPath', () => {
+  it('lets the login and public browse pages through without a session', () => {
+    expect(isOpenPath('/login')).toBe(true)
+    expect(isOpenPath('/browse/registry')).toBe(true)
+  })
+  it('keeps admin pages behind sign-in', () => {
+    for (const p of ['/', '/registry', '/registry/repo', '/push-tokens', '/browse', '/browser/x']) expect(isOpenPath(p)).toBe(false)
   })
 })
 

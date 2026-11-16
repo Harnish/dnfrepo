@@ -11,7 +11,6 @@ export default function RegistryRepo() {
   const [ips, setIPs] = useState('')
   const [open, setOpen] = useState<string | null>(null)
   const [err, setErr] = useState('')
-  const host = location.host
   const load = useCallback(() => {
     api.registryRepo(name).then((x) => { setD(x); setIPs(x.ips.join('\n')) }).catch((x) => setErr(x.message))
     api.repoUsers().then(setUsers).catch(() => {})
@@ -79,14 +78,14 @@ export default function RegistryRepo() {
                 <td>{t.created ? new Date(t.created).toLocaleString() : '—'}</td>
                 <td>{archLabel(t.arches)}</td>
                 <td>
-                  <button onClick={() => navigator.clipboard?.writeText(pullCommand(host, name, t.name))}>Copy pull</button>{' '}
+                  <button onClick={() => navigator.clipboard?.writeText(pullCommand(t.pull))}>Copy pull</button>{' '}
                   <button onClick={() => setOpen(open === t.name ? null : t.name)}>{t.layers.length} layers</button>{' '}
                   <button onClick={() => delTag(t.name)}>Delete</button>
                 </td>
               </tr>
               {open === t.name && (
                 <tr><td colSpan={6}>
-                  <pre>{pullCommand(host, name, t.name)}</pre>
+                  <pre>{pullCommand(t.pull)}</pre>
                   {t.layers.map((l) => <div key={l.digest}><code>{l.digest.slice(7, 19)}</code> {fmtSize(l.size)}</div>)}
                 </td></tr>
               )}

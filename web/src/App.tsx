@@ -10,13 +10,15 @@ import Help from './pages/Help'
 import Registry from './pages/Registry'
 import RegistryRepo from './pages/RegistryRepo'
 import PushTokens from './pages/PushTokens'
+import RegistryPublic from './pages/RegistryPublic'
+import { isOpenPath } from './registry'
 
 export default function App() {
   const nav = useNavigate()
   const loc = useLocation()
   const [email, setEmail] = useState<string | null>(null)
   const [checked, setChecked] = useState(false)
-  const open = loc.pathname === '/login'
+  const open = isOpenPath(loc.pathname)
 
   useEffect(() => {
     setUnauthorizedHandler(() => { setEmail(null); if (!open) nav('/login') })
@@ -50,6 +52,7 @@ export default function App() {
       <main>
         <Routes>
           <Route path="/login" element={<Login />} />
+          <Route path="/browse/registry" element={<RegistryPublic />} />
           <Route path="/" element={<Repos />} />
           <Route path="/repos/:slug" element={<RepoDetail />} />
           <Route path="/registry" element={<Registry />} />
