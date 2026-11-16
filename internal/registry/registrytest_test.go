@@ -32,7 +32,7 @@ func newTestReg(t *testing.T) *testReg {
 	if err != nil {
 		t.Fatal(err)
 	}
-	srv := httptest.NewServer(reg.Handler())
+	srv := httptest.NewServer(reg.FrontHandler())
 	t.Cleanup(srv.Close)
 	return &testReg{reg, f, srv}
 }
