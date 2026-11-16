@@ -30,6 +30,7 @@ type Registry struct {
 	drv    driver.StorageDriver
 	policy *Policy
 	gate   *Gate
+	gc     gcState
 }
 
 // New builds the registry. It sets c.Policy.Exists from the storage layout.
@@ -48,7 +49,7 @@ func New(ctx context.Context, c Config) (reg *Registry, err error) {
 	cfg.Auth = configuration.Auth{authName: configuration.Parameters{"policy": c.Policy}}
 	cfg.HTTP.Secret = hex.EncodeToString(secret) // signs upload state; per process is fine for one replica
 	cfg.Log.AccessLog.Disabled = true
-	logrus.SetLevel(logrus.WarnLevel) // distribution logs every request at info; keep warnings and errors
+	logrus.SetLevel(logrus.ErrorLevel) // distribution logs every request at info and every 401 at warn
 
 	defer func() { // NewApp panics on a bad configuration
 		if r := recover(); r != nil {
