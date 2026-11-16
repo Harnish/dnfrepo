@@ -75,7 +75,8 @@ func (r *Registry) visibleRepos(req *http.Request) ([]string, Verdict, error) {
 			out = append(out, n)
 		}
 	}
-	r.policy.release(req, c)
+	// No release here: the output depends on the credentials, so a wrong guess must stay counted.
+	// A right push token or a granted user already reset the count.
 	return out, Allow, nil
 }
 

@@ -199,3 +199,20 @@ func TestCatalogWithUserCredsIsNotCounted(t *testing.T) {
 		catalog(t, r, "alice", "utok", "")
 	}
 }
+
+// The catalog's output depends on the credentials (a right push token or grant shows more), so
+// wrong guesses must stay counted: refunding them would make the catalog a guessing oracle.
+func TestCatalogGuessesAreThrottled(t *testing.T) {
+	r := seedMix(t)
+	for i := 0; i < 10; i++ {
+		catalog(t, r, "nobody", "junk", "")
+	}
+	resp, _ := do(t, "GET", r.Srv.URL+"/v2/_catalog", "nobody", "junk", nil, nil)
+	if resp.StatusCode != 429 {
+		t.Fatalf("11th guess: %d", resp.StatusCode)
+	}
+	resp, _ = do(t, "GET", r.Srv.URL+"/v2/_catalog", "ci", "ptok", nil, nil)
+	if resp.StatusCode != 429 {
+		t.Fatalf("a blocked client must stay blocked even with a right token: %d", resp.StatusCode)
+	}
+}
