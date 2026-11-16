@@ -27,7 +27,7 @@ func TestPushThenAnonPullOfPublicRepo(t *testing.T) {
 	if resp.StatusCode != 200 || resp.Header.Get("Docker-Content-Digest") != dg {
 		t.Fatalf("manifest %d %q", resp.StatusCode, resp.Header.Get("Docker-Content-Digest"))
 	}
-	resp, _ = do(t, "GET", r.Srv.URL+"/v2/app/blobs/"+sha([]byte("layer-appv1")), "", "", nil, nil)
+	resp, _ = do(t, "GET", r.Srv.URL+"/v2/app/blobs/"+sha([]byte("layer-appv1amd64")), "", "", nil, nil)
 	if resp.StatusCode != 200 {
 		t.Fatalf("blob %d", resp.StatusCode)
 	}

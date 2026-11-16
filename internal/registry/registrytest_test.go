@@ -71,15 +71,19 @@ func putBlob(t *testing.T, base, repo, user, pass string, data []byte) int {
 	return resp.StatusCode
 }
 
-// pushImage pushes a one-layer OCI image; it returns the manifest digest and the first
-// non-2xx status it met (0 when everything succeeded).
-func pushImage(t *testing.T, base, repo, tag, user, pass string) (string, int) {
+func testConfig(arch string) []byte {
+	return []byte(`{"architecture":"` + arch + `","os":"linux","created":"2024-01-02T03:04:05Z","rootfs":{"type":"layers","diff_ids":[]}}`)
+}
+
+// pushArch pushes a one-layer OCI image for arch and returns the manifest digest and size
+// and the first non-2xx status it met (0 when everything succeeded).
+func pushArch(t *testing.T, base, repo, tag, arch, user, pass string) (string, int, int) {
 	t.Helper()
-	cfg := []byte(`{"architecture":"amd64","os":"linux","created":"2024-01-02T03:04:05Z","rootfs":{"type":"layers","diff_ids":[]}}`)
-	layer := []byte("layer-" + repo + tag)
+	cfg := testConfig(arch)
+	layer := []byte("layer-" + repo + tag + arch)
 	for _, b := range [][]byte{cfg, layer} {
 		if st := putBlob(t, base, repo, user, pass, b); st != 201 {
-			return "", st
+			return "", 0, st
 		}
 	}
 	m := []byte(fmt.Sprintf(`{"schemaVersion":2,"mediaType":"application/vnd.oci.image.manifest.v1+json",`+
@@ -89,7 +93,15 @@ func pushImage(t *testing.T, base, repo, tag, user, pass string) (string, int) {
 	resp, _ := do(t, "PUT", base+"/v2/"+repo+"/manifests/"+tag, user, pass, m,
 		map[string]string{"Content-Type": "application/vnd.oci.image.manifest.v1+json"})
 	if resp.StatusCode != 201 {
-		return "", resp.StatusCode
+		return "", 0, resp.StatusCode
 	}
-	return sha(m), 0
+	return sha(m), len(m), 0
+}
+
+// pushImage pushes an amd64 image; it returns the manifest digest and the first non-2xx
+// status it met (0 when everything succeeded).
+func pushImage(t *testing.T, base, repo, tag, user, pass string) (string, int) {
+	t.Helper()
+	d, _, st := pushArch(t, base, repo, tag, "amd64", user, pass)
+	return d, st
 }
