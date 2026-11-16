@@ -102,7 +102,7 @@ func (p *Policy) CanPull(r *http.Request, c Caller, repo string) (bool, error) {
 		return inAny(access.ClientIP(r, p.Trusted), ips), nil
 	case store.ModeUsers:
 		user, pass, ok := r.BasicAuth()
-		if !ok {
+		if !ok || c.Anonymous { // public endpoints never test credentials
 			return false, nil
 		}
 		good, err := p.Store.CheckRegistryUser(r.Context(), repo, user, pass)
@@ -144,5 +144,15 @@ func (p *Policy) Authorize(r *http.Request, accesses []Access) Verdict {
 			return Challenge
 		}
 	}
+	p.release(r, c)
 	return Allow
+}
+
+// release gives back the throttle count of an allowed request whose credentials were not what
+// allowed it (a push token or a granted user earned its pass and was already reset). Without
+// this a logged-in client pulling public images would exhaust its own allowance.
+func (p *Policy) release(r *http.Request, c Caller) {
+	if _, _, ok := r.BasicAuth(); ok && !c.Push {
+		p.Throttle.Refund(access.ClientIP(r, p.Trusted))
+	}
 }

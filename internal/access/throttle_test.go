@@ -50,3 +50,24 @@ func TestThrottleGroupsIPv6By64(t *testing.T) {
 		t.Fatalf("%d attempts allowed from one /64 (limit %d)", allowed, maxFailures)
 	}
 }
+
+func TestRefundUndoesOneAttemptButNeverUnblocks(t *testing.T) {
+	th := NewThrottle()
+	ip := netip.MustParseAddr("192.0.2.7")
+	for i := 0; i < 50; i++ { // allowed requests that never needed the credentials
+		if !th.Attempt(ip) {
+			t.Fatalf("attempt %d blocked despite refunds", i)
+		}
+		th.Refund(ip)
+	}
+	for i := 0; i < 10; i++ {
+		th.Attempt(ip) // ten failures stay counted
+	}
+	if th.Attempt(ip) {
+		t.Fatal("11th unrefunded attempt allowed")
+	}
+	th.Refund(ip)
+	if th.Attempt(ip) {
+		t.Fatal("refund lifted a block")
+	}
+}

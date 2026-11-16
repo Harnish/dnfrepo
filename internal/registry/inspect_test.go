@@ -124,3 +124,22 @@ func TestTagNamesIsCheapAndSorted(t *testing.T) {
 		t.Fatalf("%v", err)
 	}
 }
+
+func TestDeleteTagRefusedWhileGateClosedAndRejectsPathTags(t *testing.T) {
+	r := newTestReg(t)
+	pushImage(t, r.Srv.URL, "app", "v1", "ci", "ptok")
+	ctx := context.Background()
+	r.Reg.Gate().Close(time.Second)
+	if err := r.Reg.DeleteTag(ctx, "app", "v1"); !errors.Is(err, ErrReadOnly) {
+		t.Fatalf("delete during GC: %v", err)
+	}
+	r.Reg.Gate().Open()
+	for _, tag := range []string{"../../other/_manifests/tags/x", "a/b", "", ".hidden/..", "-x"} {
+		if err := r.Reg.DeleteTag(ctx, "app", tag); !errors.Is(err, ErrNoSuchTag) {
+			t.Errorf("tag %q: %v", tag, err)
+		}
+	}
+	if err := r.Reg.DeleteTag(ctx, "app", "v1"); err != nil {
+		t.Fatal(err)
+	}
+}

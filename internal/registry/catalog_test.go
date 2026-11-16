@@ -175,12 +175,27 @@ func TestEmptyRegistryListsNothing(t *testing.T) {
 	}
 }
 
-// Clients such as podman probe /v2/ once and only send credentials when it advertises Basic;
-// without the header an authenticated push never authenticates. Anonymous pulls still work.
-func TestBaseAdvertisesBasicChallengeButStaysOpen(t *testing.T) {
+// Docker and podman probe /v2/ first: a 401 with a Basic challenge makes them send saved
+// credentials on later requests. Pulls stay anonymous-friendly because each request is
+// authorized on its own.
+func TestBaseChallengesAnonymousCallers(t *testing.T) {
 	r := newTestReg(t)
 	resp, _ := do(t, "GET", r.Srv.URL+"/v2/", "", "", nil, nil)
-	if resp.StatusCode != 200 || !strings.HasPrefix(resp.Header.Get("WWW-Authenticate"), "Basic ") {
-		t.Fatalf("%d %q", resp.StatusCode, resp.Header.Get("WWW-Authenticate"))
+	if resp.StatusCode != 401 || !strings.HasPrefix(resp.Header.Get("WWW-Authenticate"), "Basic ") {
+		t.Fatalf("anonymous: %d %q", resp.StatusCode, resp.Header.Get("WWW-Authenticate"))
+	}
+	if resp, _ := do(t, "GET", r.Srv.URL+"/v2/", "ci", "ptok", nil, nil); resp.StatusCode != 200 {
+		t.Fatalf("with credentials: %d", resp.StatusCode)
+	}
+	seed(t, r, "pub", true, store.ModePublic)
+	if resp, _ := do(t, "GET", r.Srv.URL+"/v2/pub/manifests/v1", "", "", nil, ociAccept); resp.StatusCode != 200 {
+		t.Fatalf("anonymous pull after a 401 ping: %d", resp.StatusCode)
+	}
+}
+
+func TestCatalogWithUserCredsIsNotCounted(t *testing.T) {
+	r := seedMix(t)
+	for i := 0; i < 30; i++ {
+		catalog(t, r, "alice", "utok", "")
 	}
 }

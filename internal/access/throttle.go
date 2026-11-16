@@ -114,3 +114,16 @@ func (t *Throttle) Reset(ip netip.Addr) {
 	delete(t.m, throttleKey(ip))
 	t.mu.Unlock()
 }
+
+// Refund undoes one counted Attempt for a request that turned out not to depend on the
+// credentials (for example an allowed pull of a public image by a logged-in client). It never
+// lifts a block, and failures that were not refunded stay counted, so interleaving harmless
+// requests cannot erase guesses.
+func (t *Throttle) Refund(ip netip.Addr) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	e := t.m[throttleKey(ip)]
+	if e != nil && e.count > 0 && !t.now().Before(e.blockedUntil) {
+		e.count--
+	}
+}

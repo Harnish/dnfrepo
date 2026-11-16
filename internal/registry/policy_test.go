@@ -224,3 +224,41 @@ func TestCatalogAllowedForEveryone(t *testing.T) {
 		t.Fatalf("%v", v)
 	}
 }
+
+func TestCredentialedPullOfPublicNotThrottled(t *testing.T) {
+	// a client logged in with a repo-user token pulls public images with those credentials on every request
+	f := newFake()
+	f.rows["pub"] = store.RegistryRepo{Name: "pub", Mode: store.ModePublic, Exists: true}
+	f.users["priv|alice"] = "utok"
+	p := newPolicy(f)
+	for i := 0; i < 40; i++ {
+		if v := p.Authorize(req("alice", "utok"), pull("pub")); v != Allow {
+			t.Fatalf("request %d: %v", i, v)
+		}
+	}
+}
+
+func TestJunkCredsOnPublicPullsDoNotWipeFailures(t *testing.T) {
+	f := newFake()
+	f.rows["pub"] = store.RegistryRepo{Name: "pub", Mode: store.ModePublic, Exists: true}
+	p := newPolicy(f)
+	for i := 0; i < 10; i++ {
+		if v := p.Authorize(req("x", "junk"), push("a")); v != Challenge {
+			t.Fatalf("guess %d: %v", i, v)
+		}
+		p.Authorize(req("x", "junk"), pull("pub")) // allowed, must not reset the count
+	}
+	if v := p.Authorize(req("x", "junk"), push("a")); v != Throttled {
+		t.Fatalf("interleaving public pulls bypassed the throttle: %v", v)
+	}
+}
+
+func TestUsersModeIgnoresCredentialsForAnonymousCaller(t *testing.T) {
+	f := newFake()
+	f.rows["priv"] = store.RegistryRepo{Name: "priv", Mode: store.ModeUsers, Exists: true}
+	f.users["priv|alice"] = "utok"
+	ok, err := newPolicy(f).CanPull(req("alice", "utok"), Caller{Anonymous: true}, "priv")
+	if err != nil || ok {
+		t.Fatalf("public callers must not authenticate against users repos: %v %v", ok, err)
+	}
+}

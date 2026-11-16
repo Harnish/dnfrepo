@@ -216,3 +216,22 @@ func TestPublicRegistryIgnoresCredentials(t *testing.T) {
 		t.Fatalf("%s", w.Body)
 	}
 }
+
+func TestRegistryDeleteTagRejectsBadTagAndPublicIgnoresUserCreds(t *testing.T) {
+	r := newRegEnv(t)
+	r.push(t, "usr", "v1")
+	ctx := context.Background()
+	uid, tok, _ := r.St.CreateRepoUser(ctx, "alice")
+	r.St.SetRegistryRepo(ctx, "usr", true, store.ModeUsers)
+	r.St.SetRegistryGrants(ctx, "usr", []int64{uid})
+	if w := r.Do("DELETE", "/api/registry/tag?name=usr&tag=../../x", ""); w.Code != 400 {
+		t.Fatalf("path tag: %d", w.Code)
+	}
+	// a granted user's credentials do not make a users-mode image appear on the public page
+	if w := r.public("/api/public/registry/repos", "alice", tok); strings.Contains(w.Body.String(), "usr") {
+		t.Fatalf("%s", w.Body)
+	}
+	if w := r.public("/api/public/registry/repo?name=usr", "alice", tok); w.Code != 404 {
+		t.Fatalf("%d", w.Code)
+	}
+}

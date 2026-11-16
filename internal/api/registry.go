@@ -221,13 +221,15 @@ func (a *RegistryAPI) Routes(mux *http.ServeMux) {
 
 	mux.HandleFunc("DELETE /api/registry/tag", func(w http.ResponseWriter, r *http.Request) {
 		name, tag := r.URL.Query().Get("name"), r.URL.Query().Get("tag")
-		if !validName(name) || tag == "" {
+		if !validName(name) || !registry.ValidTag(tag) {
 			errJSON(w, 400, "bad image name or tag")
 			return
 		}
 		switch err := a.Reg.DeleteTag(r.Context(), name, tag); {
 		case errors.Is(err, registry.ErrNoSuchRepo), errors.Is(err, registry.ErrNoSuchTag):
 			errJSON(w, 404, "not found")
+		case errors.Is(err, registry.ErrReadOnly):
+			errJSON(w, 503, "registry is read-only for maintenance (garbage collection running)")
 		case err != nil:
 			errJSON(w, 500, "internal error")
 		default:

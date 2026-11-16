@@ -21,10 +21,14 @@ func (r *Registry) FrontHandler() http.Handler {
 			r.serveCatalog(w, req)
 			return
 		}
-		if req.URL.Path == "/v2/" {
-			// Anonymous pulls work, but say that credentials are understood so clients that
-			// probe /v2/ first (podman, docker) send them on the requests that need them.
+		if req.URL.Path == "/v2/" && req.Header.Get("Authorization") == "" {
+			// The standard handshake: an unauthenticated ping gets a Basic challenge, which makes
+			// docker, podman and containerd send saved credentials afterwards. Anonymous pulls
+			// still work, because every later request is authorized on its own.
 			w.Header().Set("WWW-Authenticate", `Basic realm="dnfrepo registry"`)
+			w.Header().Set("Docker-Distribution-Api-Version", "registry/2.0")
+			http.Error(w, "authentication required", http.StatusUnauthorized)
+			return
 		}
 		if req.Method != http.MethodGet && req.Method != http.MethodHead {
 			if !r.gate.Begin() {
@@ -71,6 +75,7 @@ func (r *Registry) visibleRepos(req *http.Request) ([]string, Verdict, error) {
 			out = append(out, n)
 		}
 	}
+	r.policy.release(req, c)
 	return out, Allow, nil
 }
 

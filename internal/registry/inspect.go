@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"regexp"
 	"sort"
 	"strings"
 	"time"
@@ -19,7 +20,13 @@ import (
 var (
 	ErrNoSuchRepo = errors.New("no such repository")
 	ErrNoSuchTag  = errors.New("no such tag")
+	ErrReadOnly   = errors.New("registry is read-only for maintenance")
 )
+
+var tagRE = regexp.MustCompile(`^[\w][\w.-]{0,127}$`)
+
+// ValidTag reports whether tag is a legal image tag (no path separators or dots-only parts).
+func ValidTag(tag string) bool { return tagRE.MatchString(tag) }
 
 // Layer is one layer of an image.
 type Layer struct {
@@ -189,6 +196,13 @@ func (r *Registry) fillImage(ctx context.Context, rp distribution.Repository, pa
 
 // DeleteTag removes a tag only; the manifest and blobs stay until garbage collection.
 func (r *Registry) DeleteTag(ctx context.Context, repo, tag string) error {
+	if !ValidTag(tag) { // the tag becomes a storage path element
+		return ErrNoSuchTag
+	}
+	if !r.gate.Begin() { // garbage collection is running
+		return ErrReadOnly
+	}
+	defer r.gate.End()
 	rp, err := r.repository(ctx, repo)
 	if err != nil {
 		return err
