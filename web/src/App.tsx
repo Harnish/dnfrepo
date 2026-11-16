@@ -7,6 +7,9 @@ import RepoDetail from './pages/RepoDetail'
 import Users from './pages/Users'
 import Tokens from './pages/Tokens'
 import Help from './pages/Help'
+import Registry from './pages/Registry'
+import RegistryRepo from './pages/RegistryRepo'
+import PushTokens from './pages/PushTokens'
 
 export default function App() {
   const nav = useNavigate()
@@ -33,7 +36,9 @@ export default function App() {
           <strong>dnfrepo</strong>
           <nav>
             <Link to="/">Repos</Link>
+            <Link to="/registry">Registry</Link>
             <Link to="/users">Repo users</Link>
+            <Link to="/push-tokens">Push tokens</Link>
             <Link to="/tokens">API tokens</Link>
             <Link to="/help">Help</Link>
           </nav>
@@ -47,6 +52,9 @@ export default function App() {
           <Route path="/login" element={<Login />} />
           <Route path="/" element={<Repos />} />
           <Route path="/repos/:slug" element={<RepoDetail />} />
+          <Route path="/registry" element={<Registry />} />
+          <Route path="/registry/repo" element={<RegistryRepo />} />
+          <Route path="/push-tokens" element={<PushTokens />} />
           <Route path="/users" element={<Users />} />
           <Route path="/tokens" element={<Tokens />} />
           <Route path="/help" element={<Help />} />

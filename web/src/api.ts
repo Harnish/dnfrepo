@@ -31,6 +31,8 @@ export interface MirrorInput {
   schedule?: MirrorSchedule; suite?: string; components?: string[]
 }
 
+import type { GCStatus, PublicRepoRow, PushTokenRow, RegistryRepoDetail, RegistryRepoRow, RegistryTag } from './registry'
+
 let onUnauthorized: () => void = () => {}
 export function setUnauthorizedHandler(f: () => void) { onUnauthorized = f }
 
@@ -91,6 +93,19 @@ export const api = {
   repoUsers: () => req<RepoUser[]>('GET', '/api/repo-users'),
   createRepoUser: (name: string) => req<{ id: number; name: string; token: string }>('POST', '/api/repo-users', { name }),
   revokeRepoUser: (id: number) => req<unknown>('DELETE', `/api/repo-users/${id}`),
+  registryRepos: () => req<RegistryRepoRow[]>('GET', '/api/registry/repos'),
+  registryRepo: (name: string) => req<RegistryRepoDetail>('GET', `/api/registry/repo?name=${e(name)}`),
+  setRegistryRepo: (name: string, v: { listed: boolean; mode: string; ips: string[]; user_ids: number[] }) => req<unknown>('PUT', `/api/registry/repo?name=${e(name)}`, v),
+  deleteRegistryRepo: (name: string) => req<unknown>('DELETE', `/api/registry/repo?name=${e(name)}`),
+  deleteRegistryTag: (name: string, tag: string) => req<unknown>('DELETE', `/api/registry/tag?name=${e(name)}&tag=${e(tag)}`),
+  startGC: () => req<unknown>('POST', '/api/registry/gc'),
+  gcStatus: () => req<GCStatus>('GET', '/api/registry/gc'),
+  pushTokens: () => req<PushTokenRow[]>('GET', '/api/registry/push-tokens'),
+  createPushToken: (name: string) => req<{ id: number; name: string; token: string }>('POST', '/api/registry/push-tokens', { name }),
+  revokePushToken: (id: number) => req<unknown>('DELETE', `/api/registry/push-tokens/${id}`),
+  publicRegistryRepos: () => req<PublicRepoRow[]>('GET', '/api/public/registry/repos'),
+  publicRegistryRepo: (name: string) => req<{ name: string; tags: RegistryTag[] }>('GET', `/api/public/registry/repo?name=${e(name)}`),
+
   repoGrants: (slug: string) => req<{ user_ids: number[] }>('GET', `/api/repos/${e(slug)}/users`),
   setRepoGrants: (slug: string, userIds: number[]) => req<unknown>('PUT', `/api/repos/${e(slug)}/users`, { user_ids: userIds }),
 }
