@@ -33,6 +33,15 @@ persistence:
   existingClaim: ""  # use an existing PVC instead of creating one
   hostPath: ""       # or mount a host directory (single-node clusters)
 
+# Optional container registry (Docker/OCI), served by dnfrepo itself under /v2/ on `host`.
+registry:
+  enabled: false
+  host: ""           # public registry hostname: pull commands and the extra Ingress rule
+  hostPath: ""       # existing registry data directory on the node (must be writable by podSecurityContext)
+  existingClaim: ""  # or an existing PVC; with neither, a PVC is created
+  size: 50Gi
+  storageClass: ""
+
 service:
   port: 80
 

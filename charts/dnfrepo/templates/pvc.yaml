@@ -13,3 +13,19 @@ spec:
     requests:
       storage: {{ .Values.persistence.size }}
 {{- end }}
+{{- if and .Values.registry.enabled (not .Values.registry.hostPath) (not .Values.registry.existingClaim) }}
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: {{ .Release.Name }}-registry
+  labels: {{- include "dnfrepo.labels" . | nindent 4 }}
+spec:
+  accessModes: [ReadWriteOnce]
+  {{- if .Values.registry.storageClass }}
+  storageClassName: {{ .Values.registry.storageClass }}
+  {{- end }}
+  resources:
+    requests:
+      storage: {{ .Values.registry.size }}
+{{- end }}

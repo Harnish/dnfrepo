@@ -63,9 +63,25 @@ Admin sign-in limits to know about:
 | `MIRROR_MAX_RPM_BYTES` | 4 GiB | Per-rpm limit for mirror downloads |
 | `SECRET_KEY` | empty | Seals mirror upstream credentials (username/token) in the database. Needed only when a mirror uses credentials. If you remove or change it later, stored credentials can no longer be decrypted: clear them and enter them again |
 | `REBUILD_TIMEOUT` | `10m` | Cap for one metadata rebuild (Go duration, e.g. `30m`); raise it for very large mirrors |
+| `REGISTRY_DIR` | empty | Enables the container registry (Docker/OCI) and stores its data here (the standard registry layout, so an existing `registry` data directory can be reused). The directory must be writable by the dnfrepo user |
+| `REGISTRY_HOST` | host of `BASE_URL` | Hostname shown in pull commands; set it when the registry has its own hostname |
 | `DEDUP` | `false` | When `true`, a newly uploaded, mirrored or source-fetched rpm is hardlinked to an identical existing file (same sha256 and size) instead of stored again. Needs repos on one filesystem; otherwise it keeps a normal copy. Promotion always hardlinks. Existing duplicates: `POST /api/dedup` |
 
 TLS is not handled by the app: put it behind a reverse proxy (and set `TRUSTED_PROXIES`). Use HTTPS for `users`-mode repos, since Basic auth sends the token on every request.
+
+## Container registry
+
+Set `REGISTRY_DIR` and dnfrepo serves a Docker/OCI registry under `/v2/` (the Distribution registry, embedded: one process, no sidecar). Point a hostname at dnfrepo (e.g. `registry.example.org`) and set `REGISTRY_HOST` to it.
+
+- **Pull access is per image** (Registry page): `public`, `ips` or `users` (users are the same *Repo users* as for rpm/deb repos, granted per image). An image with no settings is public, so existing anonymous pulls keep working.
+- **Listed** (off by default) puts a public image on the read-only browse page `/browse/registry` and in the anonymous catalog. Unlisted images can still be pulled by name if access allows; they are just not advertised.
+- **Pushing is never anonymous.** Create a *Push token* (admin UI), then `docker login registry.example.org -u <token name>` with the token as the password. A push token may push and pull any image; a first push creates the image with the defaults (public, unlisted). Deleting over the registry HTTP API is refused; delete tags and run garbage collection from the admin UI.
+- **Anonymous and unknown names look the same:** an anonymous request for an image that is private or does not exist gets the same 401, so names are not revealed. The catalog (`/v2/_catalog`) shows anonymous callers only Listed public images; a push token sees everything; a repo user also sees the images they are granted.
+- **Garbage collection** (admin UI) removes untagged manifests and unreferenced layers. Pushes are refused with 503 while it runs and it waits up to 60 s for running uploads first (else it aborts and deletes nothing); pulls continue. A client that is between uploading its layers and pushing its manifest when GC starts can lose those layers (standard registry behaviour); it just retries the push.
+- No body-size limit or write timeout applies to `/v2/`, so large layers upload fine; put a proxy in front only if you want limits.
+- TLS comes from your reverse proxy, as with the rest of dnfrepo; set `TRUSTED_PROXIES` so `ips` mode sees client addresses. Moving an existing registry: [docs/registry-cutover.md](docs/registry-cutover.md).
+
+Helm: `registry.enabled=true`, plus `registry.host` and `registry.hostPath` (or `existingClaim`). It adds the registry hostname to the Ingress.
 
 ## Mirror repos
 

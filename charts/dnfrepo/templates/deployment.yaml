@@ -27,6 +27,12 @@ spec:
             - { name: BASE_URL, value: {{ .Values.baseURL | quote }} }
             - { name: OIDC_ISSUER, value: {{ .Values.oidc.issuer | quote }} }
             - { name: DEDUP, value: {{ .Values.dedup | quote }} }
+            {{- if .Values.registry.enabled }}
+            - { name: REGISTRY_DIR, value: /registry }
+            {{- if .Values.registry.host }}
+            - { name: REGISTRY_HOST, value: {{ .Values.registry.host | quote }} }
+            {{- end }}
+            {{- end }}
             {{- if .Values.trustedProxies }}
             - { name: TRUSTED_PROXIES, value: {{ .Values.trustedProxies | quote }} }
             {{- end }}
@@ -44,6 +50,9 @@ spec:
             {{- end }}
           volumeMounts:
             - { name: data, mountPath: /data }
+            {{- if .Values.registry.enabled }}
+            - { name: registry, mountPath: /registry }
+            {{- end }}
           readinessProbe:
             httpGet: { path: /healthz, port: 8080 }
             initialDelaySeconds: 3
@@ -65,6 +74,17 @@ spec:
           persistentVolumeClaim:
             claimName: {{ .Values.persistence.existingClaim | default (printf "%s-data" .Release.Name) }}
           {{- end }}
+        {{- if .Values.registry.enabled }}
+        - name: registry
+          {{- if .Values.registry.hostPath }}
+          hostPath:
+            path: {{ .Values.registry.hostPath }}
+            type: Directory
+          {{- else }}
+          persistentVolumeClaim:
+            claimName: {{ .Values.registry.existingClaim | default (printf "%s-registry" .Release.Name) }}
+          {{- end }}
+        {{- end }}
       {{- with .Values.nodeSelector }}
       nodeSelector: {{- toYaml . | nindent 8 }}
       {{- end }}

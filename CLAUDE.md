@@ -12,7 +12,7 @@ Go web service managing signed dnf/yum repos, with a React admin UI. Features, e
 
 ## Layout (`internal/`)
 
-`access` client IP, ip/users guard, Basic-auth throttle | `adminauth` admin sign-in via OIDC (Authentik), `OIDC_ADMIN_GROUP` checked at login, DB sessions keyed by email | `api` JSON API + router | `config` env | `mirror` parse `.repo`, read upstream, plan, schedule, sync | `pipeline` ONLY writer of package files, per-repo locking, upload/promote/delete/rebuild/keep | `publish` createrepo_c + atomic metadata swap | `rpmmeta` header parsing | `rpmver` rpm version compare | `debver` dpkg version compare | `debmeta` .deb control reader + stanza parser | `aptindex` pure-Go apt `Packages`/`Release` generation | `serve` repo HTTP, browse, `.repo`, feed | `signer` GPG detached signature | `sources` GitHub/Plex fetch + scheduler | `store` pgx + embedded migrations (`store/migrations/NNN_*.sql`, add new numbered files, never edit applied ones).
+`access` client IP, ip/users guard, Basic-auth throttle | `adminauth` admin sign-in via OIDC (Authentik), `OIDC_ADMIN_GROUP` checked at login, DB sessions keyed by email | `api` JSON API + router | `config` env | `mirror` parse `.repo`, read upstream, plan, schedule, sync | `pipeline` ONLY writer of package files, per-repo locking, upload/promote/delete/rebuild/keep | `publish` createrepo_c + atomic metadata swap | `rpmmeta` header parsing | `rpmver` rpm version compare | `debver` dpkg version compare | `debmeta` .deb control reader + stanza parser | `aptindex` pure-Go apt `Packages`/`Release` generation | `serve` repo HTTP, browse, `.repo`, feed | `signer` GPG detached signature | `registry` embedded Distribution registry: `Policy` (who may pull/push), auth controller, filtered catalog, write `Gate`, tag inspect, GC | `sources` GitHub/Plex fetch + scheduler | `store` pgx + embedded migrations (`store/migrations/NNN_*.sql`, add new numbered files, never edit applied ones).
 
 ## Invariants (do not break)
 
@@ -25,6 +25,8 @@ Go web service managing signed dnf/yum repos, with a React admin UI. Features, e
 - Auth throttles count the attempt before checking (OIDC callback, per IP). The OIDC provider is discovered lazily (`LazyIDP`) so a provider outage never blocks startup or repo serving.
 
 - Deb support is behind `repos.kind` checks (`store.KindDeb`); rpm repos behave exactly as before. A pipeline never mixes kinds. Deb mirrors use `mirror.AptUpstream` and verify Release signatures and index/package hashes before anything is parsed or published.
+
+- Registry (`REGISTRY_DIR`; off when unset): push is never anonymous (push tokens only) and HTTP `DELETE` is refused for everyone; an anonymous request for a private, ips-denied or nonexistent image gets the identical 401; a name with no settings row is public only while it exists in storage; unlisted public images are hidden from every catalog except push tokens'; credentialed requests count against the Basic-auth throttle before they are checked; GC refuses writes (503) via `Gate` and pulls continue; `/v2/` has no body cap or write timeout (do not add a global write timeout).
 
 ## Known ceilings / deferred
 
