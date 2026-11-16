@@ -204,3 +204,16 @@ func (r *Registry) DeleteTag(ctx context.Context, repo, tag string) error {
 	}
 	return rp.Tags(ctx).Untag(ctx, tag)
 }
+
+// TagNames lists a repo's tag names without reading any manifest.
+func (r *Registry) TagNames(ctx context.Context, repo string) ([]string, error) {
+	rp, err := r.repository(ctx, repo)
+	if err != nil {
+		return nil, err
+	}
+	names, err := rp.Tags(ctx).All(ctx)
+	if unknownRepo(err) {
+		return nil, ErrNoSuchRepo
+	}
+	return names, err
+}

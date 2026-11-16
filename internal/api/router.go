@@ -17,6 +17,8 @@ type Deps struct {
 	Packages  *Packages
 	Sources   *Sources
 	Mirrors   *Mirrors
+	Registry  *RegistryAPI // nil unless the registry is enabled
+	V2        http.Handler // registry /v2/ API; nil unless the registry is enabled
 	Serve     http.Handler // serve.Handler: /r/... and /gpg.key
 	Static    fs.FS        // built React app (index.html at root)
 }
@@ -44,10 +46,19 @@ func Router(d Deps) http.Handler {
 	d.Packages.RoutesDedup(admin)
 	d.Sources.Routes(admin)
 	d.Mirrors.Routes(admin)
+	if d.Registry != nil {
+		d.Registry.Routes(admin)
+		regPublic := http.NewServeMux()
+		d.Registry.PublicRoutes(regPublic)
+		top.Handle("GET /api/public/registry/", regPublic) // unauthenticated, read-only
+	}
 	top.Handle("/api/", d.Admin.RequireAdmin(adminauth.CSRF(admin)))
 
 	top.Handle("GET /r/", d.Serve)
 	top.Handle("GET /gpg.key", d.Serve)
+	if d.V2 != nil {
+		top.Handle("/v2/", d.V2) // registry API; governed by registry access rules, not admin auth
+	}
 	top.Handle("/", spa(d.Static))
 	return top
 }

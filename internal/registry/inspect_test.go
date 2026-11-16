@@ -111,3 +111,16 @@ func TestReposSorted(t *testing.T) {
 		t.Fatalf("%v %v", got, err)
 	}
 }
+
+func TestTagNamesIsCheapAndSorted(t *testing.T) {
+	r := newTestReg(t)
+	pushImage(t, r.Srv.URL, "app", "b", "ci", "ptok")
+	pushImage(t, r.Srv.URL, "app", "a", "ci", "ptok")
+	got, err := r.Reg.TagNames(context.Background(), "app")
+	if err != nil || !eq(got, []string{"a", "b"}) {
+		t.Fatalf("%v %v", got, err)
+	}
+	if _, err := r.Reg.TagNames(context.Background(), "ghost"); !errors.Is(err, ErrNoSuchRepo) {
+		t.Fatalf("%v", err)
+	}
+}
