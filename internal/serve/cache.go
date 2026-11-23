@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"time"
 
 	"dnfrepo/internal/store"
 )
@@ -47,7 +48,11 @@ func (d Deps) cached(w http.ResponseWriter, r *http.Request, repo store.Repo, p 
 		http.NotFound(w, r)
 		return
 	}
-	lw := &lazyWriter{w: w, size: e.Size}
+	stall := d.StallTimeout
+	if stall <= 0 {
+		stall = 60 * time.Second
+	}
+	lw := &lazyWriter{w: w, rc: http.NewResponseController(w), stall: stall, size: e.Size}
 	if err := d.Fetch(r.Context(), repo, e, lw); err != nil {
 		log.Printf("serve: %s: fetch %s: %v", repo.Slug, e.Filename, err)
 		if !lw.started {
@@ -57,14 +62,18 @@ func (d Deps) cached(w http.ResponseWriter, r *http.Request, repo store.Repo, p 
 }
 
 // lazyWriter sends the 200 header on the first body byte, so a fetch that fails before any
-// data can still answer 502.
+// data can still answer 502. Each write gets its own deadline, so a client that stops reading
+// fails the write (the fill goes on without it) instead of blocking it.
 type lazyWriter struct {
 	w       http.ResponseWriter
+	rc      *http.ResponseController
+	stall   time.Duration
 	size    int64
 	started bool
 }
 
 func (l *lazyWriter) Write(b []byte) (int, error) {
+	l.rc.SetWriteDeadline(time.Now().Add(l.stall)) // unsupported writers (tests) keep no deadline
 	if !l.started {
 		l.started = true
 		h := l.w.Header()

@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"strings"
+	"time"
 
 	"dnfrepo/internal/access"
 	"dnfrepo/internal/store"
@@ -24,6 +25,9 @@ type Deps struct {
 	// Fetch streams a cache repo's not-yet-cached package from upstream into w (and caches it);
 	// nil makes cache misses 404. Wired to mirror.Syncer.Fetch.
 	Fetch func(ctx context.Context, repo store.Repo, e store.CacheEntry, w io.Writer) error
+	// StallTimeout bounds each write of a cache fill to its client, so a client that stops
+	// reading cannot hold the fill; <= 0 means 60s. (There is no global write timeout.)
+	StallTimeout time.Duration
 }
 
 var (

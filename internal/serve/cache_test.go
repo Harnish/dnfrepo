@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"io"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"net/netip"
@@ -179,5 +180,37 @@ func TestCacheServeFlatLinkToCachedFile(t *testing.T) {
 	w := f.get("/r/c/a-1-1.noarch.rpm", "192.0.2.1:1")
 	if w.Code != 200 || w.Body.String() != "LOCAL" || len(f.fetched) != 0 {
 		t.Fatalf("%d %q fetched=%d", w.Code, w.Body.String(), len(f.fetched))
+	}
+}
+
+// A client that stops reading must not block a cache fill forever: writes to it time out.
+func TestCacheServeStalledClientWriteTimesOut(t *testing.T) {
+	f := newCacheFix(t, store.ModePublic, false)
+	if err := f.st.ReplaceCacheEntries(context.Background(), f.repo.ID, []store.CacheEntry{{Path: "Packages/a/a-1-1.noarch.rpm",
+		Href: "Packages/a/a-1-1.noarch.rpm", Filename: "a-1-1.noarch.rpm", Size: 1 << 40}}); err != nil {
+		t.Fatal(err)
+	}
+	errc := make(chan error, 1)
+	chunk := make([]byte, 1<<20)
+	fetch := func(ctx context.Context, repo store.Repo, e store.CacheEntry, w io.Writer) error {
+		for {
+			if _, err := w.Write(chunk); err != nil {
+				errc <- err
+				return err
+			}
+		}
+	}
+	srv := httptest.NewServer(Handler(Deps{Store: f.st, RepoDir: repoDir(f.dir), Fetch: fetch, StallTimeout: 200 * time.Millisecond}))
+	defer srv.Close()
+	conn, err := net.Dial("tcp", srv.Listener.Addr().String())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer conn.Close()
+	conn.Write([]byte("GET /r/c/Packages/a/a-1-1.noarch.rpm HTTP/1.1\r\nHost: x\r\n\r\n")) // and never read
+	select {
+	case <-errc:
+	case <-time.After(10 * time.Second):
+		t.Fatal("write to a stalled client never timed out")
 	}
 }
