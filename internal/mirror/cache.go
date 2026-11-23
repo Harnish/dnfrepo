@@ -40,7 +40,12 @@ func (s *Syncer) refresh(ctx context.Context, repo store.Repo, up packageSource,
 			return Result{}, fmt.Errorf("staging dir: %w", err)
 		}
 		defer os.RemoveAll(dir) // no-op once the swap consumed it
-		all, err = rpm.FetchRepodata(ctx, dir)
+		// nil when nothing is published yet (or unreadable): then always refresh
+		current, _ := os.ReadFile(filepath.Join(s.Pipeline.Publisher.RepoDir(repo.Slug), "repodata", "repomd.xml"))
+		var unchanged bool
+		if all, unchanged, err = rpm.FetchRepodata(ctx, dir, current); err == nil && unchanged {
+			return Result{Status: "up to date"}, nil
+		}
 	} else {
 		all, err = up.Packages(ctx)
 	}

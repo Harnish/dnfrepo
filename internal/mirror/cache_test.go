@@ -5,6 +5,8 @@ import (
 	"context"
 	"errors"
 	"io"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -248,5 +250,27 @@ func TestFetchCredentialsScrubbed(t *testing.T) {
 	err = e.s.Fetch(context.Background(), e.repo, en, io.Discard)
 	if err == nil || strings.Contains(err.Error(), "s3cret-token") {
 		t.Fatalf("err %v", err)
+	}
+}
+
+// An unchanged upstream repomd.xml means nothing to download: refreshes must not refetch data files.
+func TestCacheRefreshUnchangedSkipsDownloads(t *testing.T) {
+	e := newSyncEnv(t, fakeOpts{}, cacheMode)
+	e.add("hello-1.2.3-4.noarch")
+	if _, err := e.run(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	rd := filepath.Join(e.pub.RepoDir("m"), "repodata") // what a real swap publishes
+	os.MkdirAll(rd, 0o755)
+	os.WriteFile(filepath.Join(rd, "repomd.xml"), e.pub.swaps[0]["repomd.xml"], 0o644)
+	res, err := e.run(context.Background())
+	if err != nil || res.Status != "up to date" {
+		t.Fatalf("%+v %v", res, err)
+	}
+	if n := e.up.Hits("repodata/filelists.xml.gz"); n != 1 || len(e.pub.swaps) != 1 {
+		t.Fatalf("filelists hits %d swaps %d", n, len(e.pub.swaps))
+	}
+	if len(e.entries()) != 1 {
+		t.Fatalf("entries %v", e.entries())
 	}
 }

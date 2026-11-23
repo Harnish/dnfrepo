@@ -159,12 +159,21 @@ var repodataName = regexp.MustCompile(`^repodata/([A-Za-z0-9][A-Za-z0-9._+~-]*)$
 // FetchRepodata copies upstream's verified repodata into dir for a cache repo: repomd.xml
 // (signature checked as in Packages) and every data file it lists, each checked against its
 // sha256. It returns the packages of the primary metadata. Only repodata/<name> locations are
-// accepted, since the copy is served from the repo's own repodata/.
-func (u *Upstream) FetchRepodata(ctx context.Context, dir string) ([]UpstreamPkg, error) {
+// accepted, since the copy is served from the repo's own repodata/. When the verified repomd.xml
+// equals current (the published one), nothing else is downloaded and unchanged is true.
+func (u *Upstream) FetchRepodata(ctx context.Context, dir string, current []byte) (pkgs []UpstreamPkg, unchanged bool, err error) {
 	md, data, err := u.repomd(ctx)
 	if err != nil {
-		return nil, err
+		return nil, false, err
 	}
+	if current != nil && bytes.Equal(md, current) {
+		return nil, true, nil
+	}
+	pkgs, err = u.copyRepodata(ctx, dir, md, data)
+	return pkgs, false, err
+}
+
+func (u *Upstream) copyRepodata(ctx context.Context, dir string, md []byte, data []dataXML) ([]UpstreamPkg, error) {
 	limit := u.maxPrimaryBytes
 	if limit == 0 {
 		limit = 1 << 30
