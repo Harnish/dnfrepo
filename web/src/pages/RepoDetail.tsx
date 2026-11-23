@@ -3,7 +3,7 @@ import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom'
 import { byLastPulled, nextMirrorFor } from '../mirrorState'
 import MirrorPanel from './MirrorPanel'
 import BatchTable from './BatchTable'
-import { Pager, usePaged } from './Pager'
+import { FilterBox, Pager, SortTh, usePaged, useTable } from './Pager'
 import { api, ApiError, AuditEvent, Batch, fmtSize, Mode, Pkg, Repo, RepoUser, Source, sourcesListLine } from '../api'
 
 export default function RepoDetail() {
@@ -36,8 +36,12 @@ export default function RepoDetail() {
   const isMirror = mirrorFor === slug && first
   const cache = isMirror && cacheFor === slug
   const shown = cache ? byLastPulled(pkgs) : pkgs
-  const pkgPg = usePaged(shown)
-  const srcPg = usePaged(sources)
+  const pkgT = useTable(shown, (p, k) => k === 'version' ? (deb ? p.version : `${p.version}-${p.release}`) : p[k as keyof Pkg] as string | number,
+    (p) => [p.name, p.version, p.release, p.arch, p.component, p.filename])
+  const pkgPg = pkgT.pg
+  const srcT = useTable(sources, (s, k) => s[k as keyof Source] as string | number | null,
+    (s) => [s.kind, s.spec, s.last_status, s.last_error])
+  const srcPg = srcT.pg
   const auditPg = usePaged(audit)
 
   const showBatches = !isMirror && batches.length > 0
@@ -122,8 +126,9 @@ export default function RepoDetail() {
       </nav>
 
       {tab === 'packages' && <>
+      {pkgs.length > 0 && <FilterBox {...pkgT.filter} />}
       <table>
-        <thead><tr><th /><th>Name</th><th>Version</th><th>Arch</th>{deb && <th>Component</th>}<th>Size</th>{cache && <th>Last pulled</th>}<th>File</th><th /></tr></thead>
+        <thead><tr><th /><SortTh k="name" label="Name" t={pkgT} /><SortTh k="version" label="Version" t={pkgT} /><SortTh k="arch" label="Arch" t={pkgT} />{deb && <SortTh k="component" label="Component" t={pkgT} />}<SortTh k="size" label="Size" t={pkgT} />{cache && <SortTh k="last_pulled" label="Last pulled" t={pkgT} />}<SortTh k="filename" label="File" t={pkgT} /><th /></tr></thead>
         <tbody>
           {pkgPg.items.map((p) => (
             <tr key={p.filename}>
@@ -133,6 +138,7 @@ export default function RepoDetail() {
               <td><button onClick={() => confirm(`Delete ${p.filename}?`) && run(async () => { await api.deletePackage(slug, p.filename); await load() })}>Delete</button></td>
             </tr>
           ))}
+          {pkgs.length > 0 && pkgPg.total === 0 && <tr><td colSpan={(deb ? 8 : 7) + (cache ? 1 : 0)} className="muted">No matches.</td></tr>}
           {pkgs.length === 0 && <tr><td colSpan={(deb ? 8 : 7) + (cache ? 1 : 0)} className="muted">{cache ? 'Nothing cached yet: packages are stored when a host first downloads them.' : 'No packages.'}</td></tr>}
         </tbody>
       </table>
@@ -210,8 +216,9 @@ export default function RepoDetail() {
 
       {tab === 'sources' && (
         <>
+          {sources.length > 0 && <FilterBox {...srcT.filter} />}
           <table>
-            <thead><tr><th>Kind</th><th>Spec</th><th>Last run</th><th>Status</th><th /></tr></thead>
+            <thead><tr><SortTh k="kind" label="Kind" t={srcT} /><SortTh k="spec" label="Spec" t={srcT} /><SortTh k="last_run" label="Last run" t={srcT} /><SortTh k="last_status" label="Status" t={srcT} /><th /></tr></thead>
             <tbody>
               {srcPg.items.map((s) => (
                 <tr key={s.id}>
@@ -223,6 +230,7 @@ export default function RepoDetail() {
                   </td>
                 </tr>
               ))}
+              {sources.length > 0 && srcPg.total === 0 && <tr><td colSpan={5} className="muted">No matches.</td></tr>}
               {sources.length === 0 && <tr><td colSpan={5} className="muted">No sources.</td></tr>}
             </tbody>
           </table>
