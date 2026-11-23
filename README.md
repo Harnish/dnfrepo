@@ -1,19 +1,40 @@
 # dnfrepo
 
-A web service that manages signed dnf/yum repositories: upload rpms or pull them from GitHub releases and Plex, promote them through dev → test → prod, control who can pull from each repo, and hand out ready-made `.repo` files.
+A self-hosted package server for a homelab or small team. One Go binary (plus PostgreSQL) serves:
+
+- **signed dnf/yum (rpm) and apt (deb) repositories**, filled by upload, by GitHub release and Plex sources, or by mirroring an upstream repo, either fully synced or as a pull-through cache;
+- **dev → test → prod pipelines**, where packages move between stages only by promotion;
+- **a Docker/OCI container registry** with per-image pull access and token-only pushes;
+- **a React admin UI** and a JSON API, with admins signing in through OpenID Connect (Authentik).
 
 ## Features
 
-- Many repos, each served at `/r/<slug>/` with `createrepo_c` metadata signed by an instance GPG key (`repo_gpgcheck=1`).
-- **Pipelines:** link repos in a chain. Only the first repo takes uploads and sources; later repos get packages only by promoting from the previous one (one or many rpms per promotion, all-or-nothing).
-- **Access, one mode per repo:** `public`, `ips` (IP/CIDR allowlist), or `users` (HTTP Basic auth with per-user tokens).
-- **Sources** (first stage only): GitHub latest-release rpm (`owner/name`) and Plex Media Server, checked when added, then every 24 h (first check a minute after startup), or on demand (*Check now* / `POST /api/sources/{id}/run`).
-- **Retention:** per repo, keep only the newest N versions of each package (default limit plus per-package overrides; 0 = unlimited). Packages are grouped by name and arch and ordered with rpm's version comparison. Enforced after every upload or promotion into the repo and when the limits are saved; each stage has its own limits.
-- **Mirrors:** a repo can mirror an upstream dnf repo (see below).
-- **apt/deb repos:** a repo can be of kind `deb` instead of `rpm`: upload `.deb` files (or GitHub release `.deb` assets), promote them through stages, or mirror a Debian/Ubuntu suite. See "apt/deb repos" below.
-- **Dedup:** identical rpms (same sha256 and size) share one file through hardlinks, so the same package in several repos or stages costs disk once. Set `DEDUP=true` to link new uploads, mirror syncs and sources as they arrive, and call `POST /api/dedup` to merge duplicates already on disk. Needs one filesystem for all repos.
-- Browse page, `<slug>.repo` file and RSS feed per repo, all under that repo's access rule.
-- React admin UI and a JSON API under `/api`.
+**Repos**
+
+- Many repos, each served at `/r/<slug>/` with metadata signed by an instance GPG key: `createrepo_c` metadata for rpm (`repo_gpgcheck=1`), pure-Go `Packages`/`Release`/`InRelease` for deb.
+- **Two formats:** a repo is `rpm` or `deb`, fixed at creation; a pipeline never mixes them. See "apt/deb repos" below.
+- **Pipelines:** link repos in a chain. Only the first repo takes uploads, sources and mirrors; later repos get packages only by promoting from the previous one (one or many packages, or a whole sync batch, all-or-nothing).
+- **Access, one mode per repo:** `public`, `ips` (IP/CIDR allowlist), or `users` (HTTP Basic auth with per-user tokens). It covers packages, metadata, the browse page, the feed and the `.repo` file.
+- **Retention:** keep only the newest N versions of each package (default limit plus per-package overrides; 0 = unlimited), per name and arch, ordered with rpm or dpkg version rules. Enforced after every upload or promotion and when the limits are saved; each stage has its own limits.
+- **Dedup:** identical packages (same sha256 and size) share one file through hardlinks. Promotion always links; `DEDUP=true` also links new uploads, syncs and sources, and `POST /api/dedup` merges duplicates already on disk. Needs one filesystem for all repos.
+- Browse page, `<slug>.repo` file and RSS feed per repo, and an activity log of every upload, promotion, purge and sync.
+
+**Getting packages in**
+
+- **Upload** an `.rpm` or `.deb` in the UI or with the API (`curl` with an API token).
+- **Sources** (first stage only): the latest GitHub release asset (`owner/name`, rpm or deb) and Plex Media Server. Checked when added, then every 24 h (first check a minute after startup), or on demand (*Check now*).
+- **Mirrors:** copy an upstream dnf repo (base URL or a pasted `.repo` file) or a Debian/Ubuntu suite on a schedule, with arch and name filters, upstream signature checks and sealed credentials. Each sync is a batch you can promote as a unit. See "Mirror repos" below.
+- **Cache mirrors (pull-through):** publish upstream's index but download a package only the first time a host asks for it, then keep the ones hosts pulled most recently. Saves disk and bandwidth when hosts use a small part of a big repo. See "Cache mode" below.
+
+**Container registry** (optional, `REGISTRY_DIR`)
+
+- The Distribution registry, embedded under `/v2/`: no sidecar.
+- Pull access per image (`public` / `ips` / `users`, sharing the repo users), pushes only with push tokens, an opt-in public browse page (`/browse/registry`), tag deletion and garbage collection from the UI. See "Container registry" below.
+
+**Admin**
+
+- Sign-in through OpenID Connect, limited to one group; or a single local admin for a homelab. Admin API tokens for scripts.
+- The UI shows each repo in tabs (packages, sources or mirror, batches, access, retention, activity, pipeline), with sortable, filterable, paginated package and source lists.
 
 ## Screenshots
 
@@ -171,4 +192,9 @@ Scripts authenticate with an admin API token (`Authorization: Bearer dnfr_...`, 
 | `GET/POST /api/repo-users`, `DELETE /api/repo-users/{id}` | repo users and tokens |
 | `PUT /api/repos/{slug}/keep` `{"keep":3,"overrides":{"plexmediaserver":10}}` | set retention limits and purge now (returns the purged filenames) |
 | `POST /api/dedup` | hardlink identical rpms across all repos (returns `linked`, `bytes_saved`, `skipped`) |
-| `GET /api/repos/{slug}/audit` | activity log |
+| `GET /api/repos/{slug}/audit` | activity log (newest 100) |
+| `GET /api/registry/repos`; `GET/PUT/DELETE /api/registry/repo?name=`; `DELETE /api/registry/tag?name=&tag=` | registry images: list, access settings, delete image or tag |
+| `GET/POST /api/registry/gc` | registry garbage collection status / run |
+| `GET/POST /api/registry/push-tokens`, `DELETE .../push-tokens/{id}` | registry push tokens |
+| `GET /api/public/registry/repos`, `GET /api/public/registry/repo?name=` | public, read-only list of Listed images (no auth) |
+| `GET /gpg.key`, `GET /healthz` | instance signing key; health check |
