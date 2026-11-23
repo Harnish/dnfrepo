@@ -109,7 +109,7 @@ func main() {
 		imgm := &imagemirror.Mirrors{Store: st, Reg: reg, Box: box, HTTP: &http.Client{Transport: tr},
 			StagingDir: filepath.Join(cfg.DataDir, "image-staging")}
 		imgm.Start(ctx, 0)
-		regAPI = &api.RegistryAPI{Store: st, Reg: reg, Policy: pol, Actor: actor, PublicHost: cfg.RegistryHost}
+		regAPI = &api.RegistryAPI{Store: st, Reg: reg, Policy: pol, Actor: actor, PublicHost: cfg.RegistryHost, Mirrors: imgm}
 		v2 = reg.FrontHandler()
 		log.Printf("container registry enabled (data %s)", cfg.RegistryDir)
 	}

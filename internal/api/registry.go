@@ -13,6 +13,7 @@ import (
 
 	"github.com/distribution/reference"
 
+	"dnfrepo/internal/imagemirror"
 	"dnfrepo/internal/registry"
 	"dnfrepo/internal/store"
 )
@@ -24,7 +25,8 @@ type RegistryAPI struct {
 	Reg        *registry.Registry
 	Policy     *registry.Policy
 	Actor      func(*http.Request) string
-	PublicHost string // host shown in pull commands
+	PublicHost string               // host shown in pull commands
+	Mirrors    *imagemirror.Mirrors // nil: no image mirror routes
 }
 
 type regTag struct {
@@ -73,6 +75,9 @@ func (a *RegistryAPI) log(r *http.Request, msg string) {
 }
 
 func (a *RegistryAPI) Routes(mux *http.ServeMux) {
+	if a.Mirrors != nil {
+		a.mirrorRoutes(mux)
+	}
 	mux.HandleFunc("GET /api/registry/repos", func(w http.ResponseWriter, r *http.Request) {
 		names, err := a.Reg.Repos(r.Context())
 		if err != nil {
