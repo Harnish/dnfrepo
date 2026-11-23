@@ -52,8 +52,8 @@ type fakeUpstream struct {
 	Override      map[string][]byte // URL path (no leading slash) -> body served instead
 	Dropped       map[string]bool   // URL path (no leading slash) -> 404
 	Requests      []*http.Request
-	Block         chan struct{}     // when set, package bodies wait until it is closed
-	Fail          bool              // package requests get 500
+	Block         chan struct{} // when set, package bodies wait until it is closed
+	Fail          bool          // package requests get 500
 
 	mu sync.Mutex // guards Requests while downloads run concurrently
 }

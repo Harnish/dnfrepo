@@ -119,7 +119,7 @@ func main() {
 		Sources:   &api.Sources{Store: st, Scheduler: sch},
 		Mirrors:   &api.Mirrors{Store: st, Syncer: syncer, Box: box, Actor: actor, OnChange: rebuild},
 		Serve: serve.Handler(serve.Deps{Store: st, RepoDir: pub.RepoDir, PublicKey: sg.PublicKeyArmored(),
-			BaseURL: cfg.BaseURL, Trusted: cfg.TrustedProxies}),
+			BaseURL: cfg.BaseURL, Trusted: cfg.TrustedProxies, Fetch: syncer.Fetch}),
 		Static: web.Dist(),
 	})
 

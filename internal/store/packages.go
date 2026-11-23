@@ -14,7 +14,7 @@ type Package struct {
 	Arch, SHA256                     string
 	Size                             int64
 	AddedAt                          time.Time
-	OriginBatchID                    *int64 // sync batch that brought it in; follows the package through promotion
+	OriginBatchID                    *int64    // sync batch that brought it in; follows the package through promotion
 	LastPulled                       time.Time // last served (cache repos) or stored
 
 	// deb only ('' for rpm): index data apt needs.

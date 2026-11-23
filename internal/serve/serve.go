@@ -2,6 +2,8 @@
 package serve
 
 import (
+	"context"
+	"io"
 	"net/http"
 	"net/netip"
 	"os"
@@ -19,6 +21,9 @@ type Deps struct {
 	PublicKey string
 	BaseURL   string // no trailing slash
 	Trusted   []netip.Prefix
+	// Fetch streams a cache repo's not-yet-cached package from upstream into w (and caches it);
+	// nil makes cache misses 404. Wired to mirror.Syncer.Fetch.
+	Fetch func(ctx context.Context, repo store.Repo, e store.CacheEntry, w io.Writer) error
 }
 
 var (
@@ -59,6 +64,15 @@ func (d Deps) dispatch(w http.ResponseWriter, r *http.Request) {
 
 // file serves only <name>.rpm and repodata/<name>, as regular files inside the repo dir.
 func (d Deps) file(w http.ResponseWriter, r *http.Request, repo store.Repo, p string) {
+	if strings.HasSuffix(p, ".rpm") || strings.HasSuffix(p, ".deb") {
+		if cache, err := d.Store.IsCacheRepo(r.Context(), repo.ID); err != nil {
+			http.Error(w, "internal error", http.StatusInternalServerError)
+			return
+		} else if cache {
+			d.cached(w, r, repo, p)
+			return
+		}
+	}
 	if repo.Kind == store.KindDeb {
 		d.aptFile(w, r, repo, p)
 		return
