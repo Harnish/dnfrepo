@@ -52,7 +52,7 @@ func TestMirrorRoundTrip(t *testing.T) {
 	next := time.Now().Add(time.Hour).UTC().Truncate(time.Microsecond)
 	in := store.Mirror{
 		RepoID: r.ID, UpstreamURL: "https://u/", Username: "bob", GPGKey: "KEY", TokenEnc: []byte{0, 1, 2, 255},
-		RequireSig: true, Arches: []string{"x86_64", "noarch"}, Include: []string{"a*"}, Exclude: []string{"b*", "c*"}, KeepLatest: 3,
+		RequireSig: true, Arches: []string{"x86_64", "noarch"}, Include: []string{"a*"}, Exclude: []string{"b*", "c*"}, KeepLatest: 3, Mode: store.ModeCache,
 		Schedule: store.Schedule{Frequency: "weekly", TimeOfDay: "03:30", Timezone: "UTC", Weekdays: []int{0, 3}, DayOfMonth: 5, Paused: true},
 		NextRun:  &next,
 	}

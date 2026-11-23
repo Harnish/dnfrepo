@@ -15,6 +15,7 @@ type Package struct {
 	Size                             int64
 	AddedAt                          time.Time
 	OriginBatchID                    *int64 // sync batch that brought it in; follows the package through promotion
+	LastPulled                       time.Time // last served (cache repos) or stored
 
 	// deb only ('' for rpm): index data apt needs.
 	Component, Control, MD5, SHA1 string
@@ -27,11 +28,11 @@ type AuditEvent struct {
 	At                    time.Time
 }
 
-const pkgCols = `id, repo_id, filename, name, version, release, arch, sha256, size, added_at, origin_batch_id, component, control, md5, sha1`
+const pkgCols = `id, repo_id, filename, name, version, release, arch, sha256, size, added_at, origin_batch_id, component, control, md5, sha1, last_pulled`
 
 func scanPkg(row pgx.Row) (Package, error) {
 	var p Package
-	err := row.Scan(&p.ID, &p.RepoID, &p.Filename, &p.Name, &p.Version, &p.Release, &p.Arch, &p.SHA256, &p.Size, &p.AddedAt, &p.OriginBatchID, &p.Component, &p.Control, &p.MD5, &p.SHA1)
+	err := row.Scan(&p.ID, &p.RepoID, &p.Filename, &p.Name, &p.Version, &p.Release, &p.Arch, &p.SHA256, &p.Size, &p.AddedAt, &p.OriginBatchID, &p.Component, &p.Control, &p.MD5, &p.SHA1, &p.LastPulled)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return p, ErrNotFound
 	}

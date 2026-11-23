@@ -12,6 +12,14 @@ var (
 	ErrMirrorRepo  = errors.New("repo is a mirror") // uploads, sources, linking refused
 	ErrNotEligible = errors.New("only an empty first-stage repo with no sources can become a mirror")
 	ErrBusy        = errors.New("sync already running")
+	ErrModeChange  = errors.New("mirror mode can only change while the repo has no packages")
+)
+
+// Mirror modes: sync downloads every wanted package on schedule; cache publishes upstream's
+// index and fetches a package only when a client first requests it.
+const (
+	ModeSync  = "sync"
+	ModeCache = "cache"
 )
 
 // Schedule: Frequency is "manual", "daily", "weekly" or "monthly"; TimeOfDay is "HH:MM"; Weekdays 0=Sunday.
@@ -30,6 +38,7 @@ type Mirror struct {
 	RequireSig               bool
 	Arches, Include, Exclude []string
 	KeepLatest               int
+	Mode                     string // ModeSync or ModeCache; "" means ModeSync on write
 	Schedule                 Schedule
 	State                    string // "idle" or "running"
 	LastStatus, LastError    string
@@ -37,13 +46,13 @@ type Mirror struct {
 }
 
 const mirrorCols = `repo_id, upstream_url, username, token_enc, gpg_key, require_sig, arches, include_pat, exclude_pat,
-	keep_latest, frequency, time_of_day, timezone, weekdays, day_of_month, paused, state, last_run, last_status, last_error, next_run`
+	keep_latest, frequency, time_of_day, timezone, weekdays, day_of_month, paused, state, last_run, last_status, last_error, next_run, mode`
 
 func scanMirror(row pgx.Row) (Mirror, error) {
 	var m Mirror
 	err := row.Scan(&m.RepoID, &m.UpstreamURL, &m.Username, &m.TokenEnc, &m.GPGKey, &m.RequireSig, &m.Arches, &m.Include, &m.Exclude,
 		&m.KeepLatest, &m.Schedule.Frequency, &m.Schedule.TimeOfDay, &m.Schedule.Timezone, &m.Schedule.Weekdays, &m.Schedule.DayOfMonth,
-		&m.Schedule.Paused, &m.State, &m.LastRun, &m.LastStatus, &m.LastError, &m.NextRun)
+		&m.Schedule.Paused, &m.State, &m.LastRun, &m.LastStatus, &m.LastError, &m.NextRun, &m.Mode)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return m, ErrNotFound
 	}
@@ -74,9 +83,23 @@ func (s *Store) SetMirror(ctx context.Context, m Mirror) error {
 		}
 		return err
 	}
-	var exists bool
-	if err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM mirrors WHERE repo_id=$1)`, m.RepoID).Scan(&exists); err != nil {
+	if m.Mode == "" {
+		m.Mode = ModeSync
+	}
+	var oldMode string
+	err = tx.QueryRow(ctx, `SELECT mode FROM mirrors WHERE repo_id=$1`, m.RepoID).Scan(&oldMode)
+	if err != nil && !errors.Is(err, pgx.ErrNoRows) {
 		return err
+	}
+	exists := err == nil
+	if exists && oldMode != m.Mode {
+		var has bool
+		if err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM packages WHERE repo_id=$1)`, m.RepoID).Scan(&has); err != nil {
+			return err
+		}
+		if has {
+			return ErrModeChange
+		}
 	}
 	if !exists {
 		var n int
@@ -90,13 +113,13 @@ func (s *Store) SetMirror(ctx context.Context, m Mirror) error {
 	sc := m.Schedule
 	if _, err := tx.Exec(ctx, `
 		INSERT INTO mirrors(repo_id, upstream_url, username, token_enc, gpg_key, require_sig, arches, include_pat, exclude_pat,
-			keep_latest, frequency, time_of_day, timezone, weekdays, day_of_month, paused, next_run)
-		VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17)
+			keep_latest, frequency, time_of_day, timezone, weekdays, day_of_month, paused, next_run, mode)
+		VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18)
 		ON CONFLICT (repo_id) DO UPDATE SET upstream_url=$2, username=$3, token_enc=$4, gpg_key=$5, require_sig=$6, arches=$7,
 			include_pat=$8, exclude_pat=$9, keep_latest=$10, frequency=$11, time_of_day=$12, timezone=$13, weekdays=$14,
-			day_of_month=$15, paused=$16, next_run=$17`,
+			day_of_month=$15, paused=$16, next_run=$17, mode=$18`,
 		m.RepoID, m.UpstreamURL, m.Username, m.TokenEnc, m.GPGKey, m.RequireSig, nn(m.Arches), nn(m.Include), nn(m.Exclude),
-		m.KeepLatest, sc.Frequency, sc.TimeOfDay, sc.Timezone, nn(sc.Weekdays), sc.DayOfMonth, sc.Paused, m.NextRun); err != nil {
+		m.KeepLatest, sc.Frequency, sc.TimeOfDay, sc.Timezone, nn(sc.Weekdays), sc.DayOfMonth, sc.Paused, m.NextRun, m.Mode); err != nil {
 		return err
 	}
 	return tx.Commit(ctx)

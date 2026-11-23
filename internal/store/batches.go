@@ -94,10 +94,15 @@ func (s *Store) AddMirrorPackages(ctx context.Context, repoID, batchID int64, pk
 	if prev != nil {
 		return ErrLaterStage
 	}
+	var batch *int64 // 0: a cache fill, no sync batch
+	action := "cached"
+	if batchID != 0 {
+		batch, action = &batchID, "synced"
+	}
 	for _, p := range pkgs {
 		_, err := tx.Exec(ctx, `
 			INSERT INTO packages(repo_id, filename, name, version, release, arch, sha256, size, origin_batch_id, component, control, md5, sha1)
-			VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)`, repoID, p.Filename, p.Name, p.Version, p.Release, p.Arch, p.SHA256, p.Size, batchID,
+			VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)`, repoID, p.Filename, p.Name, p.Version, p.Release, p.Arch, p.SHA256, p.Size, batch,
 			p.Component, p.Control, p.MD5, p.SHA1)
 		if pgCode(err) == "23505" {
 			return ErrExists
@@ -105,7 +110,7 @@ func (s *Store) AddMirrorPackages(ctx context.Context, repoID, batchID int64, pk
 		if err != nil {
 			return err
 		}
-		if _, err := tx.Exec(ctx, `INSERT INTO audit_events(repo_id, actor, action, detail) VALUES($1,$2,'synced',$3)`, repoID, actor, p.Filename); err != nil {
+		if _, err := tx.Exec(ctx, `INSERT INTO audit_events(repo_id, actor, action, detail) VALUES($1,$2,$3,$4)`, repoID, actor, action, p.Filename); err != nil {
 			return err
 		}
 	}
