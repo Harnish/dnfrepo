@@ -1,7 +1,6 @@
 package api
 
 import (
-	"context"
 	"errors"
 	"net/http"
 	"regexp"
@@ -62,10 +61,10 @@ func (a *RegistryAPI) seal(username, token string) ([]byte, string) {
 	return b, ""
 }
 
-// runDetached starts a mirror run that outlives the request.
-func (a *RegistryAPI) runDetached(r *http.Request, id int64) {
-	ctx := context.WithoutCancel(r.Context())
-	go a.Mirrors.RunOne(ctx, id) // outcome is recorded on the mirror row
+// runDetached starts a mirror run that outlives the request. A run already in flight picks up
+// a platform edit itself when it finishes.
+func (a *RegistryAPI) runDetached(r *http.Request, id int64) error {
+	return a.Mirrors.Trigger(r.Context(), id)
 }
 
 func (a *RegistryAPI) mirrorRoutes(mux *http.ServeMux) {
@@ -214,7 +213,10 @@ func (a *RegistryAPI) mirrorRoutes(mux *http.ServeMux) {
 			errJSON(w, 404, "not found")
 			return
 		}
-		a.runDetached(r, id)
+		if err := a.runDetached(r, id); errors.Is(err, imagemirror.ErrRunning) {
+			errJSON(w, 409, "already running")
+			return
+		}
 		writeJSON(w, 202, map[string]string{"status": "started"})
 	})
 

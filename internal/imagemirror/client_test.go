@@ -96,7 +96,7 @@ func TestBlobDigestMismatchRemovesFile(t *testing.T) {
 	}
 	f.blobs[dg] = []byte("tampered")
 	dst := filepath.Join(t.TempDir(), "blob")
-	_, err := (&Client{Scheme: "http"}).Blob(context.Background(), fakeRef(t, f, "a/b", "latest"), dg, dst)
+	_, err := (&Client{Scheme: "http"}).Blob(context.Background(), fakeRef(t, f, "a/b", "latest"), dg, dst, 0)
 	if err == nil {
 		t.Fatal("mismatch accepted")
 	}
@@ -110,7 +110,7 @@ func TestBlobOK(t *testing.T) {
 	f.fakeSingle(t, "a/b", "latest")
 	for dg, b := range f.blobs {
 		dst := filepath.Join(t.TempDir(), "blob")
-		n, err := (&Client{Scheme: "http"}).Blob(context.Background(), fakeRef(t, f, "a/b", "latest"), dg, dst)
+		n, err := (&Client{Scheme: "http"}).Blob(context.Background(), fakeRef(t, f, "a/b", "latest"), dg, dst, 0)
 		got, _ := os.ReadFile(dst)
 		if err != nil || n != int64(len(b)) || string(got) != string(b) {
 			t.Fatalf("%d %v", n, err)
@@ -136,7 +136,7 @@ func TestMaliciousDigestsRejected(t *testing.T) {
 		f.blobs[dg] = []byte("x") // a hostile upstream serves whatever it named
 		f.putManifest("a/b", dg, "application/vnd.oci.image.manifest.v1+json", []byte("{}"))
 		dst := filepath.Join(dir, "sub", "..", "..", "escaped")
-		if _, err := c.Blob(context.Background(), fakeRef(t, f, "a/b", "latest"), dg, dst); err == nil {
+		if _, err := c.Blob(context.Background(), fakeRef(t, f, "a/b", "latest"), dg, dst, 0); err == nil {
 			t.Errorf("blob %q accepted", dg)
 		}
 		if _, err := os.Stat(dst); !os.IsNotExist(err) {
@@ -148,5 +148,19 @@ func TestMaliciousDigestsRejected(t *testing.T) {
 	}
 	if f.gets() != 0 {
 		t.Errorf("%d blob requests made for invalid digests", f.gets())
+	}
+}
+
+func TestBlobLargerThanManifestSizeRefused(t *testing.T) {
+	f := newFake(t)
+	f.fakeSingle(t, "a/b", "latest")
+	for dg, b := range f.blobs {
+		dst := filepath.Join(t.TempDir(), "blob")
+		if _, err := (&Client{Scheme: "http"}).Blob(context.Background(), fakeRef(t, f, "a/b", "latest"), dg, dst, int64(len(b)-1)); err == nil {
+			t.Fatal("oversized blob accepted")
+		}
+		if _, err := os.Stat(dst); !os.IsNotExist(err) {
+			t.Fatal("oversized blob left on disk")
+		}
 	}
 }

@@ -242,3 +242,95 @@ func TestInspectListsPlatforms(t *testing.T) {
 		t.Fatalf("single: %s %v", b, err)
 	}
 }
+
+func TestCredentialedRowExistsEvenIfImportFails(t *testing.T) {
+	e := setup(t)
+	e.f.user, e.f.pass = "u", "pw"
+	e.f.fakeIndex(t, "a/b", "latest", "linux/amd64")
+	mr := e.add(t, "a/b", nil, 3)
+	sealed, _ := e.m.Box.Seal("pw")
+	u := "u"
+	e.st.UpdateImageMirror(context.Background(), mr.ID, nil, 3, &u, sealed, false)
+	e.reg.Gate().Close(time.Second) // import refused: the settings row must already say users
+	defer e.reg.Gate().Open()
+	e.run(t, mr.ID)
+	if r, _ := e.st.RegistryRepoByName(context.Background(), "mirror/a/b"); r.Mode != store.ModeUsers {
+		t.Fatalf("settings %+v", r)
+	}
+}
+
+func TestPlatformChangeDuringRunIsApplied(t *testing.T) {
+	e := setup(t)
+	ctx := context.Background()
+	e.f.fakeIndex(t, "a/b", "latest", "linux/amd64", "linux/arm64")
+	mr := e.add(t, "a/b", nil, 3)
+	once := false
+	e.m.beforeImport = func() { // an admin's PUT lands while the run is staging
+		if !once {
+			once = true
+			e.st.UpdateImageMirror(ctx, mr.ID, []string{"linux/arm64"}, 3, nil, nil, true)
+		}
+	}
+	e.run(t, mr.ID)
+	e.run(t, mr.ID)
+	ts, err := e.reg.Tags(ctx, "mirror/a/b")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, tg := range ts {
+		if tg.Name == "latest" && strings.Join(tg.Arches, ",") != "linux/arm64" {
+			t.Fatalf("latest still has %v", tg.Arches)
+		}
+	}
+}
+
+func TestTriggerRefusesWhileRunning(t *testing.T) {
+	e := setup(t)
+	mr := e.add(t, "a/b", nil, 3)
+	e.m.claim(mr.ID)
+	if err := e.m.Trigger(context.Background(), mr.ID); !errors.Is(err, ErrRunning) {
+		t.Fatalf("%v", err)
+	}
+	e.m.release(mr.ID)
+}
+
+func TestStalledUpstreamTimesOutAndReleases(t *testing.T) {
+	e := setup(t)
+	e.f.fakeIndex(t, "a/b", "latest", "linux/amd64")
+	e.f.stall = true
+	e.m.RunTimeout = 300 * time.Millisecond
+	id := e.add(t, "a/b", nil, 3).ID
+	done := make(chan error, 1)
+	go func() { done <- e.m.RunOne(context.Background(), id) }()
+	select {
+	case err := <-done:
+		if err == nil {
+			t.Fatal("stalled run succeeded")
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("run hung on a stalled upstream")
+	}
+	if !e.m.claim(id) {
+		t.Fatal("claim not released")
+	}
+}
+
+func TestPruneKeepsRepushedDatedTag(t *testing.T) {
+	e := setup(t)
+	ctx := context.Background()
+	_, tok, _ := e.st.CreatePushToken(ctx, "ci", "test")
+	srv := httptest.NewServer(e.reg.FrontHandler())
+	defer srv.Close()
+	id := e.add(t, "a/b", nil, 1).ID
+	e.f.fakeIndex(t, "a/b", "latest", "linux/amd64")
+	e.run(t, id)
+	if _, st := registrytest.Push(t, srv.URL, "mirror/a/b", "latest-20261123", "ci", tok); st != 0 {
+		t.Fatalf("push %d", st)
+	}
+	pushed := e.tag(t, "mirror/a/b", "latest-20261123")
+	e.f.fakeIndex(t, "a/b", "latest", "linux/amd64")
+	e.run(t, id)
+	if got := e.tag(t, "mirror/a/b", "latest-20261123"); got != pushed {
+		t.Fatalf("re-pushed dated tag changed: %s", got)
+	}
+}

@@ -30,7 +30,8 @@ type fakeUp struct {
 	bearer     bool
 	user, pass string
 	blobGets   int
-	serial     int // makes each built image unique
+	stall      bool // blob requests hang until the client gives up
+	serial     int  // makes each built image unique
 }
 
 func newFake(t *testing.T) *fakeUp {
@@ -108,6 +109,12 @@ func (f *fakeUp) serve(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		f.blobGets++
+		if f.stall {
+			f.mu.Unlock()
+			<-r.Context().Done()
+			f.mu.Lock()
+			return
+		}
 		w.Write(b)
 		return
 	}

@@ -37,8 +37,11 @@ type Mirrors struct {
 	Scheme     string           // "" = https
 	Now        func() time.Time // nil = time.Now
 
-	mu      sync.Mutex
-	running map[int64]bool
+	RunTimeout time.Duration // bound for one run (0 = 1 h)
+
+	mu           sync.Mutex
+	running      map[int64]bool
+	beforeImport func() // test hook
 }
 
 func (m *Mirrors) now() time.Time {
@@ -63,25 +66,63 @@ func (m *Mirrors) claim(id int64) bool {
 
 func (m *Mirrors) release(id int64) { m.mu.Lock(); delete(m.running, id); m.mu.Unlock() }
 
+// Trigger starts a run that outlives ctx; ErrRunning if one is already going.
+func (m *Mirrors) Trigger(ctx context.Context, id int64) error {
+	if !m.claim(id) {
+		return ErrRunning
+	}
+	go func() {
+		defer m.release(id)
+		m.runClaimed(context.WithoutCancel(ctx), id) // outcome is recorded on the mirror row
+	}()
+	return nil
+}
+
 // RunOne runs one mirror and records the outcome on it.
 func (m *Mirrors) RunOne(ctx context.Context, id int64) error {
 	if !m.claim(id) {
 		return ErrRunning
 	}
 	defer m.release(id)
-	mr, err := m.Store.ImageMirrorByID(ctx, id)
-	if err != nil {
-		return err
+	return m.runClaimed(ctx, id)
+}
+
+func (m *Mirrors) runClaimed(ctx context.Context, id int64) error {
+	t := m.RunTimeout
+	if t <= 0 {
+		t = time.Hour
 	}
-	status, err := m.run(ctx, mr)
-	msg := ""
-	if err != nil {
-		status, msg = "error", err.Error()
+	ctx, cancel := context.WithTimeout(ctx, t)
+	defer cancel()
+	for attempt := 0; ; attempt++ {
+		mr, err := m.Store.ImageMirrorByID(ctx, id)
+		if err != nil {
+			return err
+		}
+		status, err := m.run(ctx, mr)
+		msg := ""
+		if err != nil {
+			status, msg = "error", err.Error()
+		}
+		if rerr := m.Store.RecordImageMirrorRun(context.WithoutCancel(ctx), id, status, msg); rerr != nil && err == nil {
+			err = rerr
+		}
+		// Platforms edited while this run was copying: its copy used the old set. Force another.
+		now, gerr := m.Store.ImageMirrorByID(ctx, id)
+		if err != nil || gerr != nil || samePlatforms(now.Platforms, mr.Platforms) || attempt >= 2 {
+			return err
+		}
+		if err := m.Store.UpdateImageMirror(ctx, id, now.Platforms, now.Keep, nil, nil, true); err != nil {
+			return err
+		}
 	}
-	if rerr := m.Store.RecordImageMirrorRun(ctx, id, status, msg); rerr != nil && err == nil {
-		err = rerr
-	}
-	return err
+}
+
+func samePlatforms(a, b []string) bool {
+	a, b = slices.Clone(a), slices.Clone(b)
+	slices.Sort(a)
+	slices.Sort(b)
+	return slices.Equal(slices.Compact(a), slices.Compact(b))
 }
 
 func (m *Mirrors) client(username string, secret []byte) (*Client, error) {
@@ -282,6 +323,18 @@ func (m *Mirrors) run(ctx context.Context, mr store.ImageMirror) (string, error)
 	if !isIndex(mt) {
 		mans = []registry.ImportManifest{top}
 	}
+	// Settings row first: a name without one is public while it exists, so a private upstream's
+	// image must never be in storage without its users-mode row.
+	mode := store.ModePublic
+	if mr.Secret != nil {
+		mode = store.ModeUsers // private upstream: nobody can pull until an admin opens it
+	}
+	if err := m.Store.EnsureRegistryRepoMode(ctx, mr.LocalName, mode); err != nil {
+		return "", err
+	}
+	if m.beforeImport != nil {
+		m.beforeImport()
+	}
 	dg, err := m.Reg.Import(ctx, mr.LocalName, blobs, mans, []string{mr.Tag, dated})
 	if errors.Is(err, registry.ErrReadOnly) {
 		return "", errors.New("registry busy (garbage collection); retried next run")
@@ -293,13 +346,6 @@ func (m *Mirrors) run(ctx context.Context, mr store.ImageMirror) (string, error)
 		return "", err
 	}
 	if err := m.prune(ctx, mr); err != nil {
-		return "", err
-	}
-	mode := store.ModePublic
-	if mr.Secret != nil {
-		mode = store.ModeUsers // private upstream: nobody can pull until an admin opens it
-	}
-	if err := m.Store.EnsureRegistryRepoMode(ctx, mr.LocalName, mode); err != nil {
 		return "", err
 	}
 	return StatusDownloaded, nil
@@ -360,7 +406,7 @@ func (m *Mirrors) stage(ctx context.Context, c *Client, ref Ref, local, dir stri
 		}
 		seen[dg] = true
 		p := filepath.Join(dir, strings.ReplaceAll(dg, ":", "-"))
-		n, err := c.Blob(ctx, ref, dg, p)
+		n, err := c.Blob(ctx, ref, dg, p, size)
 		if err != nil {
 			return err
 		}
@@ -412,8 +458,11 @@ func (m *Mirrors) prune(ctx context.Context, mr store.ImageMirror) error {
 		return err
 	}
 	for i := mr.Keep; i < len(vs); i++ {
-		if err := m.Reg.DeleteTag(ctx, mr.LocalName, vs[i].Tag); err != nil && !errors.Is(err, registry.ErrNoSuchTag) {
-			return err
+		// A dated tag someone pushed over since is theirs now: drop it from the ledger, keep the tag.
+		if cur, err := m.Reg.TagDigest(ctx, mr.LocalName, vs[i].Tag); err == nil && cur == vs[i].Digest {
+			if err := m.Reg.DeleteTag(ctx, mr.LocalName, vs[i].Tag); err != nil && !errors.Is(err, registry.ErrNoSuchTag) {
+				return err
+			}
 		}
 		if err := m.Store.DeleteImageVersion(ctx, mr.ID, vs[i].Tag); err != nil {
 			return err

@@ -267,8 +267,9 @@ func (c *Client) Manifest(ctx context.Context, r Ref, ref string) (string, []byt
 	return mt, b, nil
 }
 
-// Blob downloads blob dg to dst, verifying its sha256; dst is removed on any failure.
-func (c *Client) Blob(ctx context.Context, r Ref, dg, dst string) (n int64, err error) {
+// Blob downloads blob dg to dst, verifying its sha256 and, when size > 0, refusing more bytes
+// than that (a hostile upstream cannot fill the disk). dst is removed on any failure.
+func (c *Client) Blob(ctx context.Context, r Ref, dg, dst string, size int64) (n int64, err error) {
 	if err := checkDigest(dg); err != nil {
 		return 0, err
 	}
@@ -293,8 +294,15 @@ func (c *Client) Blob(ctx context.Context, r Ref, dg, dst string) (n int64, err 
 		}
 	}()
 	h := sha256.New()
-	if n, err = io.Copy(io.MultiWriter(f, h), resp.Body); err != nil {
+	var body io.Reader = resp.Body
+	if size > 0 {
+		body = io.LimitReader(resp.Body, size+1)
+	}
+	if n, err = io.Copy(io.MultiWriter(f, h), body); err != nil {
 		return 0, err
+	}
+	if size > 0 && n != size {
+		return 0, fmt.Errorf("blob %s: %d bytes, manifest says %d", dg, n, size)
 	}
 	if got := "sha256:" + hex.EncodeToString(h.Sum(nil)); got != dg {
 		return 0, fmt.Errorf("blob %s: digest mismatch (got %s)", dg, got)
