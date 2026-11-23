@@ -4,6 +4,7 @@ package pipeline
 import (
 	"context"
 	"crypto/sha256"
+	"dnfrepo/internal/aptindex"
 	"encoding/hex"
 	"errors"
 	"fmt"
@@ -36,6 +37,9 @@ func ValidFilename(name string) bool { return filenameRe.MatchString(name) }
 type Publisher interface {
 	RepoDir(slug string) string
 	Rebuild(ctx context.Context, slug string) error
+	// Cache repos: publish upstream's verified index instead of rebuilding from local files.
+	SwapRepodata(slug, src string) error
+	PublishApt(ctx context.Context, repo store.Repo, pkgs []aptindex.Package) error
 }
 
 type Service struct {

@@ -3,6 +3,7 @@ package pipeline
 import (
 	"bytes"
 	"context"
+	"dnfrepo/internal/aptindex"
 	"errors"
 	"os"
 	"path/filepath"
@@ -25,6 +26,22 @@ type fakePub struct {
 	ctxErr    error         // ctx.Err() as seen by the last Rebuild
 	block     chan struct{} // when set, Rebuild waits until it is closed
 	entered   chan struct{} // when set, Rebuild signals here on entry
+	swapped   []string      // SwapRepodata sources
+	apt       [][]aptindex.Package
+}
+
+func (f *fakePub) SwapRepodata(slug, src string) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.swapped = append(f.swapped, src)
+	return nil
+}
+
+func (f *fakePub) PublishApt(ctx context.Context, repo store.Repo, pkgs []aptindex.Package) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.apt = append(f.apt, pkgs)
+	return nil
 }
 
 func (f *fakePub) RepoDir(slug string) string { return filepath.Join(f.dir, "repos", slug) }

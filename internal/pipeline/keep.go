@@ -2,6 +2,7 @@ package pipeline
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -12,13 +13,21 @@ import (
 
 // purgeLocked deletes the oldest versions beyond the repo's keep limits (default, or the
 // per-package override; 0 = unlimited). Packages are grouped by name and arch and ordered
-// with rpm's version comparison. The caller holds the repo lock and rebuilds afterwards.
+// with rpm's version comparison. A cache repo also honours its mirror's keep_latest (the smallest
+// positive limit wins, as in mirror.Plan) and keeps the most recently pulled packages instead
+// of the newest versions. The caller holds the repo lock and rebuilds afterwards.
 func (s *Service) purgeLocked(ctx context.Context, repo store.Repo, actor string) ([]string, error) {
 	keep, overrides, err := s.Store.RepoKeep(ctx, repo.ID)
 	if err != nil {
 		return nil, err
 	}
-	if keep == 0 && len(overrides) == 0 {
+	cache, keepLatest := false, 0
+	if m, err := s.Store.MirrorByRepo(ctx, repo.ID); err == nil && m.Mode == store.ModeCache {
+		cache, keepLatest = true, m.KeepLatest
+	} else if err != nil && !errors.Is(err, store.ErrNotFound) {
+		return nil, err
+	}
+	if keep == 0 && len(overrides) == 0 && keepLatest <= 0 {
 		return nil, nil
 	}
 	pkgs, err := s.Store.ListPackages(ctx, repo.ID)
@@ -36,10 +45,16 @@ func (s *Service) purgeLocked(ctx context.Context, repo store.Repo, actor string
 		if v, ok := overrides[k[0]]; ok {
 			limit = v
 		}
+		if keepLatest > 0 && (limit <= 0 || keepLatest < limit) {
+			limit = keepLatest
+		}
 		if limit <= 0 || len(g) <= limit {
 			continue
 		}
-		sort.Slice(g, func(i, j int) bool { // newest first
+		sort.Slice(g, func(i, j int) bool { // newest first (cache: most recently pulled first)
+			if cache && !g[i].LastPulled.Equal(g[j].LastPulled) {
+				return g[i].LastPulled.After(g[j].LastPulled)
+			}
 			if c := comparePackage(repo.Kind, g[i].Version, g[i].Release, g[j].Version, g[j].Release); c != 0 {
 				return c > 0
 			}
