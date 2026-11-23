@@ -28,6 +28,23 @@ func (p *Publisher) rebuildApt(ctx context.Context, repo store.Repo) error {
 		pkgs = append(pkgs, aptindex.Package{Component: r.Component, Arch: r.Arch, Filename: r.Filename, Size: r.Size,
 			MD5: r.MD5, SHA1: r.SHA1, SHA256: r.SHA256, Control: r.Control})
 	}
+	return p.publishApt(repo, d, pkgs)
+}
+
+// PublishApt writes a signed apt archive listing pkgs (rather than the repo's package rows) and
+// swaps it in. Used by cache repos, whose index is upstream's.
+func (p *Publisher) PublishApt(ctx context.Context, repo store.Repo, pkgs []aptindex.Package) error {
+	l := p.lock(repo.Slug)
+	l.Lock()
+	defer l.Unlock()
+	d, err := p.Store.DebRepoByID(ctx, repo.ID)
+	if err != nil {
+		return err
+	}
+	return p.publishApt(repo, d, pkgs)
+}
+
+func (p *Publisher) publishApt(repo store.Repo, d store.DebRepo, pkgs []aptindex.Package) error {
 	files := aptindex.Build(d.Suite, d.Components, d.Arches, pkgs, time.Now())
 
 	dir := p.RepoDir(repo.Slug)

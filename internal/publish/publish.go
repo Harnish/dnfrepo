@@ -59,6 +59,13 @@ func (p *Publisher) Rebuild(ctx context.Context, slug string) error {
 		if err != nil {
 			return fmt.Errorf("look up repo %s: %w", slug, err)
 		}
+		// A cache repo publishes upstream's index (SwapRepodata / PublishApt); a rebuild from its
+		// few local files would hide every package it has not cached yet.
+		if cache, err := p.Store.IsCacheRepo(ctx, repo.ID); err != nil {
+			return fmt.Errorf("look up repo %s: %w", slug, err)
+		} else if cache {
+			return nil
+		}
 		if repo.Kind == store.KindDeb {
 			return p.rebuildApt(ctx, repo)
 		}
@@ -83,6 +90,37 @@ func (p *Publisher) Rebuild(ctx context.Context, slug string) error {
 	if err := os.Rename(filepath.Join(build, "repodata"), newDir); err != nil {
 		return err
 	}
+	return p.signAndLink(dir, gen)
+}
+
+// SwapRepodata publishes src (an upstream repomd.xml and the data files it lists, on the same
+// filesystem as the repo) as the repo's repodata: signs repomd.xml and swaps it in atomically.
+// src is consumed. Used by cache repos, whose index is upstream's.
+func (p *Publisher) SwapRepodata(slug, src string) error {
+	if !store.ValidSlug(slug) {
+		return fmt.Errorf("invalid slug %q", slug)
+	}
+	l := p.lock(slug)
+	l.Lock()
+	defer l.Unlock()
+	dir := p.RepoDir(slug)
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return err
+	}
+	gen := fmt.Sprintf("%d", time.Now().UnixNano())
+	if err := os.Rename(src, filepath.Join(dir, "repodata."+gen)); err != nil {
+		return err
+	}
+	if err := os.Chmod(filepath.Join(dir, "repodata."+gen), 0o755); err != nil {
+		return err
+	}
+	return p.signAndLink(dir, gen)
+}
+
+// signAndLink signs repodata.<gen>/repomd.xml, points the repodata symlink at that generation
+// and prunes older ones.
+func (p *Publisher) signAndLink(dir, gen string) error {
+	newDir := filepath.Join(dir, "repodata."+gen)
 	repomd, err := os.ReadFile(filepath.Join(newDir, "repomd.xml"))
 	if err != nil {
 		return err
