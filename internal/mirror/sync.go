@@ -39,8 +39,11 @@ type Syncer struct {
 	Timeout     time.Duration // per sync, applied by Trigger and the scheduler; default 6h
 	Tick        time.Duration // scheduler poll interval; default 1 minute
 
-	wg        sync.WaitGroup // sync goroutines and the scheduler loop
+	wg        sync.WaitGroup // sync goroutines, cache fills and the scheduler loop
 	startOnce sync.Once
+
+	fillMu  sync.Mutex
+	filling map[string]bool // "<repoID>/<filename>" of cache fills in progress
 }
 
 // Result.Status is "synced" or "up to date".
@@ -122,13 +125,8 @@ func (s *Syncer) run(ctx context.Context, repoID int64, actor string, token *str
 	if err != nil {
 		return Result{}, err
 	}
-	if len(m.TokenEnc) > 0 {
-		if s.Box == nil {
-			return Result{}, errors.New("mirror has stored credentials but no secret key is configured")
-		}
-		if *token, err = s.Box.Open(m.TokenEnc); err != nil {
-			return Result{}, errors.New("cannot decrypt stored mirror credentials")
-		}
+	if *token, err = s.openToken(m); err != nil {
+		return Result{}, err
 	}
 	up, filter, err := s.source(ctx, m, repo, *token)
 	if err != nil {
@@ -198,6 +196,21 @@ func (s *Syncer) run(ctx context.Context, repoID int64, actor string, token *str
 		os.Remove(f.Path) // the published copy is a separate link (or copy)
 	}
 	return Result{Status: "synced", BatchID: *batchID, Added: len(pkgs)}, err
+}
+
+// openToken returns the mirror's upstream credential ("" when none is stored).
+func (s *Syncer) openToken(m store.Mirror) (string, error) {
+	if len(m.TokenEnc) == 0 {
+		return "", nil
+	}
+	if s.Box == nil {
+		return "", errors.New("mirror has stored credentials but no secret key is configured")
+	}
+	t, err := s.Box.Open(m.TokenEnc)
+	if err != nil {
+		return "", errors.New("cannot decrypt stored mirror credentials")
+	}
+	return t, nil
 }
 
 // source builds the upstream reader and sync filter for a mirror; token is the opened credential.

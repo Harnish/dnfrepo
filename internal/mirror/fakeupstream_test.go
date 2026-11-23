@@ -52,6 +52,8 @@ type fakeUpstream struct {
 	Override      map[string][]byte // URL path (no leading slash) -> body served instead
 	Dropped       map[string]bool   // URL path (no leading slash) -> 404
 	Requests      []*http.Request
+	Block         chan struct{}     // when set, package bodies wait until it is closed
+	Fail          bool              // package requests get 500
 
 	mu sync.Mutex // guards Requests while downloads run concurrently
 }
@@ -241,6 +243,13 @@ func (f *fakeUpstream) serve(w http.ResponseWriter, r *http.Request) {
 	}
 	for _, p := range f.Pkgs {
 		if p.Href == path {
+			if f.Fail {
+				http.Error(w, "boom", http.StatusInternalServerError)
+				return
+			}
+			if f.Block != nil {
+				<-f.Block
+			}
 			w.Write(p.Body)
 			return
 		}
