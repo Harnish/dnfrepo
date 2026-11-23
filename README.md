@@ -30,6 +30,7 @@ A self-hosted package server for a homelab or small team. One Go binary (plus Po
 
 - The Distribution registry, embedded under `/v2/`: no sidecar.
 - Pull access per image (`public` / `ips` / `users`, sharing the repo users), pushes only with push tokens, an opt-in public browse page (`/browse/registry`), tag deletion and garbage collection from the UI. See "Container registry" below.
+- **Image mirrors:** follow an upstream tag such as `docker.io/plexinc/pms-docker:latest`, copying only when it changes, with selectable CPU types and the last N versions kept as dated tags.
 
 **Admin**
 
@@ -112,6 +113,16 @@ Set `REGISTRY_DIR` and dnfrepo serves a Docker/OCI registry under `/v2/` (the Di
 - **Garbage collection** (admin UI) removes untagged manifests and unreferenced layers. Pushes are refused with 503 while it runs and it waits up to 60 s for running uploads first (else it aborts and deletes nothing); pulls continue. A client that is between uploading its layers and pushing its manifest when GC starts can lose those layers (standard registry behaviour); it just retries the push.
 - No body-size limit or write timeout applies to `/v2/`, so large layers upload fine; put a proxy in front only if you want limits.
 - TLS comes from your reverse proxy, as with the rest of dnfrepo; set `TRUSTED_PROXIES` so `ips` mode sees client addresses. Moving an existing registry: [docs/registry-cutover.md](docs/registry-cutover.md).
+
+### Image mirrors
+
+Follow an upstream image tag, like a GitHub source follows releases. On the Registry page, *Add mirror* takes an upstream reference (`docker.io/plexinc/pms-docker:latest`; a bare `alpine` means `docker.io/library/alpine:latest`), the local name (default: the upstream path), the CPU types to copy and how many versions to keep (default 3).
+
+- **Runs:** when added, a minute after startup and then every 24 h, or *Check now*. A run asks upstream for the tag's digest; unchanged (and the local tag still points at the last copy) means nothing is downloaded. A changed tag is downloaded into `<DATA_DIR>/image-staging`, each layer checked against its sha256, then imported. Pushes pause only for that local import, never for the download.
+- **Tags:** each copy moves the local tag (same name as upstream's) and adds a dated tag `<tag>-YYYYMMDD` (`-2`, `-3` for more copies the same UTC day). Only the newest N dated tags this mirror created are kept; older ones are untagged and freed at the next garbage collection. Tags you pushed yourself are never pruned, but the mirror owns its moving tag: a push over it is replaced at the next run.
+- **CPU types:** *Load platforms* lists what upstream publishes. None selected (or all) copies the image exactly, attestations included, so the digest matches upstream. A subset gets a new index without attestations. If a selected type disappears upstream, the run fails and the previous copy stays.
+- **Credentials:** optional upstream username and token (needs `SECRET_KEY`; sealed, never shown again). A new image from a mirror with credentials starts in `users` mode with nobody granted, so a private image is not served until you open it. Without credentials it starts public and unlisted. Existing access settings are never changed.
+- Docker Hub's token sign-in, ghcr.io and other v2 registries work. Not copied: Docker schema1 images, cosign signature tags, referrers. Removing a mirror keeps the local image.
 
 Helm: `registry.enabled=true`, plus `registry.host` and `registry.hostPath` (or `existingClaim`). It adds the registry hostname to the Ingress.
 
@@ -197,4 +208,5 @@ Scripts authenticate with an admin API token (`Authorization: Bearer dnfr_...`, 
 | `GET/POST /api/registry/gc` | registry garbage collection status / run |
 | `GET/POST /api/registry/push-tokens`, `DELETE .../push-tokens/{id}` | registry push tokens |
 | `GET /api/public/registry/repos`, `GET /api/public/registry/repo?name=` | public, read-only list of Listed images (no auth) |
+| `GET/POST /api/registry/mirrors`, `PUT/DELETE .../mirrors/{id}`, `POST .../mirrors/{id}/run`, `POST .../mirrors/inspect` | registry image mirrors (see docs/api.md) |
 | `GET /gpg.key`, `GET /healthz` | instance signing key; health check |

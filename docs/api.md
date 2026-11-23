@@ -146,6 +146,19 @@ Replaces identical rpm files (same sha256 and size) across all repos with hardli
 | `POST /api/auth/tokens` `{"name":"ci"}` | `201 {"id":1,"name":"ci","token":"dnfr_..."}`; the token is shown only here |
 | `DELETE /api/auth/tokens/{id}` | revoke |
 
+## Registry image mirrors
+
+Admin session or API token. Credentials are write-only: responses carry `has_credentials`.
+
+| | |
+|---|---|
+| `GET /api/registry/mirrors` | list: `id, upstream, tag, local_name, platforms, keep, username, has_credentials, upstream_digest, last_run, last_status, last_error` |
+| `POST /api/registry/mirrors` `{"upstream":"docker.io/plexinc/pms-docker:latest","local_name":"plexinc/pms-docker","platforms":["linux/amd64"],"keep":3,"username":"u","token":"t"}` | add; all but `upstream` optional (local name = upstream path, keep 3, platforms none = all). 201, then the first run starts. 400 bad reference / digest-pinned / keep < 1 / bad platform / credentials without `SECRET_KEY`; 409 a mirror for that local name and tag exists |
+| `PUT /api/registry/mirrors/{id}` `{"platforms":[],"keep":5}` | edit platforms, keep and credentials (`username` omitted keeps them, `""` clears them, `username`+`token` replaces them). Upstream, tag and local name are fixed. A platform change forces a copy and starts a run |
+| `DELETE /api/registry/mirrors/{id}` | stop mirroring; the local image and tags stay |
+| `POST /api/registry/mirrors/{id}/run` | check now (202; the result lands on the mirror row) |
+| `POST /api/registry/mirrors/inspect` `{"upstream":"…","username":"…","token":"…"}` or `{"id":12}` | upstream digest and platforms (`[]` for a single-platform image); `{id}` uses the stored credentials. 502 with the upstream error |
+
 ## Other endpoints
 
 See the table in the README. All need the same authentication, except `GET /api/auth/methods`, `GET /api/auth/oidc/*` and `POST /api/auth/local`.
