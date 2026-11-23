@@ -126,3 +126,27 @@ func TestManifestSchema1Rejected(t *testing.T) {
 		t.Fatalf("%v", err)
 	}
 }
+
+func TestMaliciousDigestsRejected(t *testing.T) {
+	f := newFake(t)
+	f.fakeSingle(t, "a/b", "latest")
+	c := &Client{Scheme: "http"}
+	dir := t.TempDir()
+	for _, dg := range []string{"sha256:../../evil", "sha256:" + strings.Repeat("a", 63), "md5:abc", "../x"} {
+		f.blobs[dg] = []byte("x") // a hostile upstream serves whatever it named
+		f.putManifest("a/b", dg, "application/vnd.oci.image.manifest.v1+json", []byte("{}"))
+		dst := filepath.Join(dir, "sub", "..", "..", "escaped")
+		if _, err := c.Blob(context.Background(), fakeRef(t, f, "a/b", "latest"), dg, dst); err == nil {
+			t.Errorf("blob %q accepted", dg)
+		}
+		if _, err := os.Stat(dst); !os.IsNotExist(err) {
+			t.Errorf("blob %q wrote a file", dg)
+		}
+		if _, _, err := c.Manifest(context.Background(), fakeRef(t, f, "a/b", "latest"), dg); err == nil {
+			t.Errorf("manifest %q accepted", dg)
+		}
+	}
+	if f.gets() != 0 {
+		t.Errorf("%d blob requests made for invalid digests", f.gets())
+	}
+}

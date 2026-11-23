@@ -18,6 +18,7 @@ import (
 	"time"
 
 	"github.com/distribution/reference"
+	"github.com/opencontainers/go-digest"
 )
 
 // Ref is an upstream image tag. Host is the API host (docker.io is served by registry-1.docker.io).
@@ -223,8 +224,27 @@ func (c *Client) Head(ctx context.Context, r Ref) (string, error) {
 	return sha(b), nil
 }
 
+var tagRE = regexp.MustCompile(`^[A-Za-z0-9_][A-Za-z0-9_.-]{0,127}$`)
+
+// checkDigest accepts only well-formed sha256 digests. Digests come from upstream manifests
+// (untrusted) and end up in request URLs and staging file names.
+func checkDigest(dg string) error {
+	d, err := digest.Parse(dg)
+	if err != nil || d.Algorithm() != digest.SHA256 {
+		return fmt.Errorf("invalid digest %q", dg)
+	}
+	return nil
+}
+
 // Manifest fetches a manifest by tag or digest; a digest reference is verified.
 func (c *Client) Manifest(ctx context.Context, r Ref, ref string) (string, []byte, error) {
+	if strings.Contains(ref, ":") {
+		if err := checkDigest(ref); err != nil {
+			return "", nil, err
+		}
+	} else if !tagRE.MatchString(ref) {
+		return "", nil, fmt.Errorf("invalid tag %q", ref)
+	}
 	resp, err := c.do(ctx, r, "GET", "manifests/"+ref, accept)
 	if err != nil {
 		return "", nil, err
@@ -249,6 +269,9 @@ func (c *Client) Manifest(ctx context.Context, r Ref, ref string) (string, []byt
 
 // Blob downloads blob dg to dst, verifying its sha256; dst is removed on any failure.
 func (c *Client) Blob(ctx context.Context, r Ref, dg, dst string) (n int64, err error) {
+	if err := checkDigest(dg); err != nil {
+		return 0, err
+	}
 	resp, err := c.do(ctx, r, "GET", "blobs/"+dg, "")
 	if err != nil {
 		return 0, err
