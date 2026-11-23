@@ -61,6 +61,7 @@ const flows: { id: string; title: string; steps: React.ReactNode[] }[] = [
     <>Pick a schedule (manual, daily, weekly, monthly, with time zone) and save. Click <em>Sync now</em> to start; a schedule missed while the server was down runs once at startup.</>,
     <>A sync publishes only when it is fully downloaded and verified, so a big first sync shows nothing until it finishes. Watch the status on the Mirror panel. Saving replaces every field except the credentials.</>,
     <>Fedora: make one mirror per release and repo (for example <code>fedora-42</code>, <code>updates-42</code>) and sync on the schedule you test against. Disk use is yours to watch.</>,
+    <>To save disk and bandwidth, choose <em>Mode: Cache</em>. The schedule then refreshes only upstream’s index; a package is downloaded the first time a host asks for it, and <em>Keep latest</em> keeps the most recently pulled versions. Include/exclude filters do not apply in cache mode.</>,
   ] },
   { id: 'hub-spoke', title: 'Hub and spoke (dev → QA → prod sites)', steps: [
     <>On the hub, make the repo <em>users</em> mode and create a repo user; copy the token.</>,

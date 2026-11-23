@@ -94,7 +94,15 @@ A mirror is an empty first-stage repo that copies an upstream dnf repo. Give it 
 - **Batches:** every sync is a numbered batch. A batch can be promoted to the next stage as a unit, and again from each later stage it reaches.
 - **First sync:** a sync publishes only when it is fully downloaded and verified, so a big repo shows nothing until the whole first sync finishes. A sync stops after 6 hours, so a very large first sync may take more than one run; files already staged and verified are reused, not downloaded again. If a sync published but its metadata rebuild failed, the next sync retries the rebuild even when nothing new is upstream. Syncs are additive: upstream deletions are not mirrored, and a package you delete by hand comes back at the next sync.
 - **Disk:** the mirror's size and the staging directory (`<DATA_DIR>/mirror-staging`) are the operator's concern. Staging is not cleaned up automatically. Internal and private upstream URLs are allowed (admins are trusted).
-- **Editing:** saving replaces every field except the credentials. Incremental `createrepo_c --update` exists but is off (no measured speedup). Frozen snapshot URLs are not supported yet (see `docs/TODO.md`).
+- **Editing:** saving replaces every field except the credentials and the mode (both kept when omitted). Incremental `createrepo_c --update` exists but is off (no measured speedup). Frozen snapshot URLs are not supported yet (see `docs/TODO.md`).
+
+### Cache mode (pull-through)
+
+Set the mirror's mode to `cache` to store only what hosts actually download. The schedule (or "Refresh index") fetches upstream's index and verifies it as a sync would (signature, then every index file's sha256), but downloads no packages. rpm repos serve upstream's `repodata/` files as they are, with `repomd.xml` re-signed by this server; deb repos regenerate the signed archive from upstream's indexes. Hosts therefore see every upstream package.
+
+- **First request:** a package not stored yet streams from upstream to the host while it is saved; it is kept only if its size, sha256 and header match the index. If the host disconnects, the download still finishes and is kept. A second host asking during that download is proxied from upstream directly. Upstream unreachable and not cached: `502`.
+- **Retention:** the same limit as other repos (repo keep, per-name overrides, mirror `keep_latest`; the smallest positive wins), per name and arch, but ranked by `last_pulled` (updated on every download) instead of version. Purging removes only the local file; the package stays downloadable. A refresh also drops cached packages upstream no longer lists.
+- **Limits:** include/exclude filters do not apply (rpm arches too; deb arches pick which indexes are published). The mode can only change while the repo has no packages. Metadata rebuilds do nothing for cache repos, so upstream's index is never replaced by the cached subset.
 
 ## apt/deb repos
 

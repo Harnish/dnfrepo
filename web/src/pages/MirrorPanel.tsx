@@ -1,5 +1,5 @@
 import { FormEvent, useCallback, useEffect, useState } from 'react'
-import { api, ApiError, Batch, Mirror, MirrorInput, MirrorSchedule, RepoSection } from '../api'
+import { api, ApiError, Batch, Mirror, MirrorInput, MirrorMode, MirrorSchedule, RepoSection } from '../api'
 import { dayName, describeSchedule } from '../schedule'
 import BatchTable from './BatchTable'
 
@@ -38,6 +38,8 @@ export default function MirrorPanel({ slug, deb = false, next, onChanged }: { sl
   const [exclude, setExclude] = useState('')
   const [keepLatest, setKeepLatest] = useState(0)
   const [sched, setSched] = useState<MirrorSchedule>(defaultSchedule())
+  const [mode, setMode] = useState<MirrorMode>('sync')
+  const cache = mode === 'cache'
 
   const status = useCallback(async () => {
     try { setM(await api.mirror(slug)) } catch (x) { if (!(x instanceof ApiError && x.status === 404)) throw x }
@@ -48,7 +50,7 @@ export default function MirrorPanel({ slug, deb = false, next, onChanged }: { sl
     setUrl(c.upstream_url); setUser(c.username); setGpg(c.gpg_key); setReqSig(c.require_signature)
     setSuite(c.suite ?? ''); setComponents((c.components ?? ['main']).join(' '))
     setArches(c.arches.join(' ')); setInclude(c.include.join(' ')); setExclude(c.exclude.join(' '))
-    setKeepLatest(c.keep_latest); setSched({ ...defaultSchedule(), ...c.schedule, weekdays: c.schedule.weekdays ?? [] })
+    setKeepLatest(c.keep_latest); setMode(c.mode ?? 'sync'); setSched({ ...defaultSchedule(), ...c.schedule, weekdays: c.schedule.weekdays ?? [] })
   }
 
   useEffect(() => {
@@ -87,7 +89,7 @@ export default function MirrorPanel({ slug, deb = false, next, onChanged }: { sl
     if (sched.frequency === 'weekly' && sched.weekdays.length === 0) { setErr('Pick at least one weekday for a weekly schedule'); return }
     const body: MirrorInput = {
       gpg_key: gpg, require_signature: reqSig, arches: lines(arches), include: lines(include), exclude: lines(exclude),
-      keep_latest: keepLatest, schedule: sched,
+      keep_latest: keepLatest, schedule: sched, mode,
     }
     if (deb) { body.suite = suite; body.components = lines(components) }
     if (src === 'url' || deb) body.upstream_url = url
@@ -117,8 +119,8 @@ export default function MirrorPanel({ slug, deb = false, next, onChanged }: { sl
 
   async function sync() {
     setErr(''); setMsg('')
-    try { await api.syncNow(slug); setMsg('Sync started') } catch (x) {
-      if (x instanceof ApiError && x.status === 409) setMsg('A sync is already running')
+    try { await api.syncNow(slug); setMsg(cache ? 'Index refresh started' : 'Sync started') } catch (x) {
+      if (x instanceof ApiError && x.status === 409) setMsg(cache ? 'A refresh is already running' : 'A sync is already running')
       else setErr((x as Error).message)
     }
     await status().catch(() => {})
@@ -152,18 +154,24 @@ export default function MirrorPanel({ slug, deb = false, next, onChanged }: { sl
       {m && (
         <div className="card">
           <p>
-            Status: <strong>{m.state === 'running' ? 'syncing…' : m.last_status || 'never synced'}</strong>
+            Status: <strong>{m.state === 'running' ? (cache ? 'refreshing index…' : 'syncing…') : m.last_status || (cache ? 'index never refreshed' : 'never synced')}</strong>
             {m.last_error && <span className="error"> {m.last_error}</span>}
           </p>
           <p className="muted">Last run: {fmt(m.last_run) || 'never'} · Next run: {fmt(m.next_run) || 'none'} · {describeSchedule(m.schedule)}</p>
           <div className="row">
-            <button className="primary" onClick={sync} disabled={running}>Sync now</button>
+            <button className="primary" onClick={sync} disabled={running}>{cache ? 'Refresh index' : 'Sync now'}</button>
             <button onClick={remove} disabled={running}>Stop mirroring</button>
           </div>
         </div>
       )}
 
       <form className="card" onSubmit={save}>
+        <fieldset>
+          <legend>Mode</legend>
+          <label className="inline"><input type="radio" name="mode" checked={!cache} onChange={() => setMode('sync')} /> Sync: download every wanted package on schedule</label>
+          <label className="inline"><input type="radio" name="mode" checked={cache} onChange={() => setMode('cache')} /> Cache: download a package the first time a host requests it</label>
+          {cache && <p className="muted">The schedule refreshes upstream's index only. Hosts see every upstream package; include/exclude filters do not apply{deb ? ' (arches still pick which indexes are published)' : ''}. Keep latest keeps the most recently pulled versions per package. Mode can only change while the repo has no packages.</p>}
+        </fieldset>
         <fieldset>
           <legend>Upstream</legend>
           {!deb && <div className="row">
@@ -215,11 +223,13 @@ export default function MirrorPanel({ slug, deb = false, next, onChanged }: { sl
         </fieldset>
 
         <fieldset>
-          <legend>Filters</legend>
+          <legend>{cache ? 'Retention' : 'Filters'}</legend>
           <div className="row">
-            <label>Arches<input value={arches} onChange={(e) => setArches(e.target.value)} placeholder={deb ? 'amd64 arm64' : 'x86_64 noarch'} required={deb} /></label>
+            {(deb || !cache) && <label>Arches<input value={arches} onChange={(e) => setArches(e.target.value)} placeholder={deb ? 'amd64 arm64' : 'x86_64 noarch'} required={deb} /></label>}
+            {!cache && <>
             <label>Include (name globs)<input value={include} onChange={(e) => setInclude(e.target.value)} /></label>
             <label>Exclude (name globs)<input value={exclude} onChange={(e) => setExclude(e.target.value)} /></label>
+            </>}
             <label>Keep latest (0 = all)<input type="number" min={0} value={keepLatest} onChange={(e) => setKeepLatest(Math.max(0, Number(e.target.value) || 0))} /></label>
           </div>
         </fieldset>
@@ -247,7 +257,7 @@ export default function MirrorPanel({ slug, deb = false, next, onChanged }: { sl
               ))}
             </div>
           )}
-          <label className="inline"><input type="checkbox" checked={sched.paused} onChange={(e) => setS({ paused: e.target.checked })} /> Pause scheduled syncs</label>
+          <label className="inline"><input type="checkbox" checked={sched.paused} onChange={(e) => setS({ paused: e.target.checked })} /> Pause scheduled {cache ? 'refreshes' : 'syncs'}</label>
         </fieldset>
 
         <button className="primary">Save mirror</button>

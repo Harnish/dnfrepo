@@ -7,7 +7,7 @@ export class ApiError extends Error {
 export type Mode = 'public' | 'ips' | 'users'
 export type Kind = 'rpm' | 'deb'
 export interface Repo { slug: string; name: string; kind: Kind; mode: Mode; previous: string | null; ips: string[]; keep: number; keep_overrides: Record<string, number>; suite?: string; components?: string[]; arches?: string[] }
-export interface Pkg { filename: string; name: string; version: string; release: string; arch: string; sha256: string; size: number; component?: string; added_at: string; origin_batch_id: number | null }
+export interface Pkg { filename: string; name: string; version: string; release: string; arch: string; sha256: string; size: number; component?: string; added_at: string; last_pulled: string; origin_batch_id: number | null }
 export interface Source { id: number; kind: 'github' | 'plex'; spec: string; last_run: string | null; last_status: string; last_error: string }
 export interface RepoUser { id: number; name: string; revoked: boolean }
 export interface AuditEvent { id: number; actor: string; action: string; detail: string; at: string }
@@ -15,9 +15,12 @@ export interface ApiToken { id: number; name: string; created_by: string; create
 export interface PromoteResult { to: string; promoted: string[]; skipped: string[] }
 
 export interface MirrorSchedule { frequency: 'manual' | 'daily' | 'weekly' | 'monthly'; time_of_day: string; timezone: string; weekdays: number[]; day_of_month: number; paused: boolean }
+/** sync: download every wanted package on schedule. cache: publish upstream's index, fetch a package on first request. */
+export type MirrorMode = 'sync' | 'cache'
 export interface Mirror {
   upstream_url: string; username: string; has_credentials: boolean; gpg_key: string; require_signature: boolean
   arches: string[]; include: string[]; exclude: string[]; keep_latest: number; schedule: MirrorSchedule
+  mode: MirrorMode
   suite?: string; components?: string[]
   state: 'idle' | 'running'; last_run: string | null; last_status: string; last_error: string; next_run: string | null
 }
@@ -28,7 +31,7 @@ export interface MirrorInput {
   upstream_url?: string; repo_file?: string; section?: string; vars?: Record<string, string>
   username?: string; token?: string; clear_credentials?: boolean
   gpg_key?: string; require_signature?: boolean; arches?: string[]; include?: string[]; exclude?: string[]; keep_latest?: number
-  schedule?: MirrorSchedule; suite?: string; components?: string[]
+  schedule?: MirrorSchedule; suite?: string; components?: string[]; mode?: MirrorMode
 }
 
 import type { GCStatus, PublicRepoRow, PushTokenRow, RegistryRepoDetail, RegistryRepoRow, RegistryTag } from './registry'

@@ -1,6 +1,7 @@
 package serve
 
 import (
+	"errors"
 	"log"
 	"net/http"
 	"os"
@@ -13,14 +14,21 @@ import (
 
 // cached serves a package of a cache repo. Only paths listed in the repo's upstream index are
 // served: from the local copy when there is one (recording the pull), else from upstream via
-// Fetch, which also caches it.
+// Fetch, which also caches it. A bare /<file> (the browse page's links) serves only a local copy.
 func (d Deps) cached(w http.ResponseWriter, r *http.Request, repo store.Repo, p string) {
 	if !allSegs(strings.Split(p, "/")) {
 		http.NotFound(w, r)
 		return
 	}
 	e, err := d.Store.CacheEntryByPath(r.Context(), repo.ID, p)
-	if err != nil || !(rpmRe.MatchString(e.Filename) || debRe.MatchString(e.Filename)) {
+	switch {
+	case errors.Is(err, store.ErrNotFound) && !strings.Contains(p, "/"):
+		e = store.CacheEntry{Filename: p} // local only: no upstream entry to fetch
+	case err != nil:
+		http.NotFound(w, r)
+		return
+	}
+	if !(rpmRe.MatchString(e.Filename) || debRe.MatchString(e.Filename)) {
 		http.NotFound(w, r)
 		return
 	}
@@ -35,7 +43,7 @@ func (d Deps) cached(w http.ResponseWriter, r *http.Request, repo store.Repo, p 
 			return
 		}
 	}
-	if d.Fetch == nil {
+	if d.Fetch == nil || e.Href == "" {
 		http.NotFound(w, r)
 		return
 	}

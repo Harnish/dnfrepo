@@ -38,7 +38,7 @@ curl -fsS -H "Authorization: Bearer $TOKEN" -F file=@foo-1.0-1.x86_64.rpm "$BASE
 
 `201`:
 ```json
-{"filename":"foo-1.0-1.x86_64.rpm","name":"foo","version":"1.0","release":"1","arch":"x86_64","sha256":"…","size":12345,"added_at":"2026-11-10T20:00:00Z","origin_batch_id":null}
+{"filename":"foo-1.0-1.x86_64.rpm","name":"foo","version":"1.0","release":"1","arch":"x86_64","sha256":"…","size":12345,"added_at":"2026-11-10T20:00:00Z","last_pulled":"2026-11-10T20:00:00Z","origin_batch_id":null}
 ```
 
 | Status | Meaning |
@@ -102,7 +102,7 @@ jq -n --rawfile f fedora.repo '{repo_file:$f}' |
 
 ### Configure: `PUT /api/repos/{slug}/mirror`
 
-Body: `upstream_url` **or** `repo_file` (+ `section` when it has several, `vars` for its `$variables`), and optionally `username`, `token`, `clear_credentials`, `gpg_key` (armored), `require_signature`, `arches`, `include`, `exclude` (globs on package name), `keep_latest` (0 = all), `schedule` `{frequency: manual|daily|weekly|monthly, time_of_day:"HH:MM", timezone, weekdays:[0-6, 0=Sunday], day_of_month, paused}`.
+Body: `upstream_url` **or** `repo_file` (+ `section` when it has several, `vars` for its `$variables`), and optionally `username`, `token`, `clear_credentials`, `gpg_key` (armored), `require_signature`, `arches`, `include`, `exclude` (globs on package name), `keep_latest` (0 = all), `mode` (`sync` default, or `cache`; omitted keeps the stored mode; changing it on a repo with packages is `409`), `schedule` `{frequency: manual|daily|weekly|monthly, time_of_day:"HH:MM", timezone, weekdays:[0-6, 0=Sunday], day_of_month, paused}`. In cache mode `POST .../mirror/sync` refreshes the index only (status `refreshed`); see README "Cache mode". `last_pulled` on packages is when the file was last downloaded (or stored).
 
 ```
 jq -n --arg tok "$UPSTREAM_TOKEN" '{upstream_url:"https://pkgs.example.org/el9/x86_64/", username:"ci", token:$tok,

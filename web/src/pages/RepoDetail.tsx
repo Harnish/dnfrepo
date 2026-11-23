@@ -1,6 +1,6 @@
 import { FormEvent, useCallback, useEffect, useState } from 'react'
 import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom'
-import { nextMirrorFor } from '../mirrorState'
+import { byLastPulled, nextMirrorFor } from '../mirrorState'
 import MirrorPanel from './MirrorPanel'
 import BatchTable from './BatchTable'
 import { api, ApiError, AuditEvent, Batch, fmtSize, Mode, Pkg, Repo, RepoUser, Source, sourcesListLine } from '../api'
@@ -23,6 +23,7 @@ export default function RepoDetail() {
   const [msg, setMsg] = useState('')
   const [src, setSrc] = useState({ kind: 'github', spec: '' })
   const [mirrorFor, setMirrorFor] = useState<string | null>(null)
+  const [cacheFor, setCacheFor] = useState<string | null>(null) // slug whose mirror is in cache mode
   const [keep, setKeep] = useState(0)
   const [rules, setRules] = useState<{ name: string; keep: number }[]>([])
 
@@ -31,6 +32,8 @@ export default function RepoDetail() {
   const deb = repo?.kind === 'deb'
   const first = repo ? !repo.previous : false
   const isMirror = mirrorFor === slug && first
+  const cache = isMirror && cacheFor === slug
+  const shown = cache ? byLastPulled(pkgs) : pkgs
 
   const run = async (f: () => Promise<unknown>, ok = '') => {
     setErr(''); setMsg('')
@@ -52,8 +55,9 @@ export default function RepoDetail() {
     if (!r.previous) {
       setSources(await api.sources(slug))
       // 404 = not a mirror; a freshly created "mirror" repo (?mirror=1) shows the empty form
-      const m = await api.mirror(slug).then(() => true, (x) => { if (x instanceof ApiError && x.status === 404) return false; throw x })
-      setMirrorFor((was) => nextMirrorFor(was, slug, true, m, params.get('mirror') === '1'))
+      const mc = await api.mirror(slug).then((c) => c, (x) => { if (x instanceof ApiError && x.status === 404) return null; throw x })
+      setCacheFor(mc?.mode === 'cache' ? slug : null)
+      setMirrorFor((was) => nextMirrorFor(was, slug, true, mc !== null, params.get('mirror') === '1'))
     }
     if (r.mode === 'users') {
       setUsers(await api.repoUsers())
@@ -97,17 +101,17 @@ export default function RepoDetail() {
 
       <h2>Packages</h2>
       <table>
-        <thead><tr><th /><th>Name</th><th>Version</th><th>Arch</th>{deb && <th>Component</th>}<th>Size</th><th>File</th><th /></tr></thead>
+        <thead><tr><th /><th>Name</th><th>Version</th><th>Arch</th>{deb && <th>Component</th>}<th>Size</th>{cache && <th>Last pulled</th>}<th>File</th><th /></tr></thead>
         <tbody>
-          {pkgs.map((p) => (
+          {shown.map((p) => (
             <tr key={p.filename}>
               <td><input type="checkbox" checked={selected.has(p.filename)} onChange={() => toggle(p.filename)} aria-label={`select ${p.filename}`} /></td>
-              <td>{p.name}</td><td>{deb ? p.version : `${p.version}-${p.release}`}</td><td>{p.arch}</td>{deb && <td>{p.component}</td>}<td>{fmtSize(p.size)}</td>
+              <td>{p.name}</td><td>{deb ? p.version : `${p.version}-${p.release}`}</td><td>{p.arch}</td>{deb && <td>{p.component}</td>}<td>{fmtSize(p.size)}</td>{cache && <td>{new Date(p.last_pulled).toLocaleString()}</td>}
               <td><a href={deb ? `/r/${slug}/pool/${p.component}/${p.filename}` : `/r/${slug}/${p.filename}`}>{p.filename}</a></td>
               <td><button onClick={() => confirm(`Delete ${p.filename}?`) && run(async () => { await api.deletePackage(slug, p.filename); await load() })}>Delete</button></td>
             </tr>
           ))}
-          {pkgs.length === 0 && <tr><td colSpan={deb ? 8 : 7} className="muted">No packages.</td></tr>}
+          {pkgs.length === 0 && <tr><td colSpan={(deb ? 8 : 7) + (cache ? 1 : 0)} className="muted">{cache ? 'Nothing cached yet: packages are stored when a host first downloads them.' : 'No packages.'}</td></tr>}
         </tbody>
       </table>
       <div className="row">
@@ -126,7 +130,7 @@ export default function RepoDetail() {
             <input type="file" accept={deb ? '.deb' : '.rpm'} onChange={(e) => { const f = e.target.files?.[0]; if (f) run(async () => { await api.upload(slug, f); await load() }, `Uploaded ${f.name}`); e.target.value = '' }} />
           </label>
         )}
-        {first && isMirror && <span className="muted">Packages arrive by sync.</span>}
+        {first && isMirror && <span className="muted">{cache ? 'Packages are cached on first download.' : 'Packages arrive by sync.'}</span>}
         {!first && <span className="muted">Packages arrive here only by promotion.</span>}
       </div>
 

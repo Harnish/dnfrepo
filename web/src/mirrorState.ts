@@ -4,3 +4,8 @@ export function nextMirrorFor(was: string | null, slug: string, first: boolean, 
   if (probe || wantParam) return slug
   return was === slug ? was : null
 }
+
+/** Cache-mode package order: most recently pulled first (retention keeps these). */
+export function byLastPulled<T extends { last_pulled: string }>(pkgs: T[]): T[] {
+  return [...pkgs].sort((a, b) => b.last_pulled.localeCompare(a.last_pulled))
+}

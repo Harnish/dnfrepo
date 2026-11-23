@@ -170,3 +170,14 @@ func TestNonCacheRepoUnchanged(t *testing.T) {
 		t.Fatalf("nested rpm path on plain repo: %d", w.Code)
 	}
 }
+
+// Browse and admin links use /r/<slug>/<file>.rpm; a cached file must be reachable that way too.
+func TestCacheServeFlatLinkToCachedFile(t *testing.T) {
+	f := newCacheFix(t, store.ModePublic, false)
+	f.entry(t, "Packages/a/a-1-1.noarch.rpm", "a-1-1.noarch.rpm")
+	os.WriteFile(filepath.Join(repoDir(f.dir)("c"), "a-1-1.noarch.rpm"), []byte("LOCAL"), 0o644)
+	w := f.get("/r/c/a-1-1.noarch.rpm", "192.0.2.1:1")
+	if w.Code != 200 || w.Body.String() != "LOCAL" || len(f.fetched) != 0 {
+		t.Fatalf("%d %q fetched=%d", w.Code, w.Body.String(), len(f.fetched))
+	}
+}
