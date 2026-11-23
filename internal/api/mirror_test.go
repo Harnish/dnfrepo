@@ -433,3 +433,45 @@ func TestPutMirrorFixups(t *testing.T) {
 	}
 	putMirror(t, e, "dev", `{"upstream_url":"https://h/x/","clear_credentials":true}`, 200)
 }
+
+func TestPutMirrorMode(t *testing.T) {
+	e, _, _ := mirrorEnv(t)
+	r := mkRepo(t, e, "dev", "")
+	putMirror(t, e, "dev", `{"upstream_url":"https://h/x/","mode":"bogus"}`, 400)
+	putMirror(t, e, "dev", `{"upstream_url":"https://h/x/","mode":"cache"}`, 200)
+	var got struct {
+		Mode string `json:"mode"`
+	}
+	json.Unmarshal(e.Do("GET", "/api/repos/dev/mirror", "").Body.Bytes(), &got)
+	if got.Mode != "cache" {
+		t.Fatalf("mode %q", got.Mode)
+	}
+	// omitted mode keeps the stored one
+	putMirror(t, e, "dev", `{"upstream_url":"https://h/y/"}`, 200)
+	json.Unmarshal(e.Do("GET", "/api/repos/dev/mirror", "").Body.Bytes(), &got)
+	if got.Mode != "cache" {
+		t.Fatalf("mode after omitted %q", got.Mode)
+	}
+	if err := e.St.AddMirrorPackages(context.Background(), r.ID, 0, []store.Package{{RepoID: r.ID, Filename: "a-1-1.noarch.rpm", Name: "a",
+		Version: "1", Release: "1", Arch: "noarch", SHA256: "s", Size: 1}}, "t"); err != nil {
+		t.Fatal(err)
+	}
+	putMirror(t, e, "dev", `{"upstream_url":"https://h/x/","mode":"sync"}`, 409)
+}
+
+func TestPackagesHaveLastPulled(t *testing.T) {
+	e, _, _ := mirrorEnv(t)
+	r := mkRepo(t, e, "dev", "")
+	putMirror(t, e, "dev", `{"upstream_url":"https://h/x/","mode":"cache"}`, 200)
+	if err := e.St.AddMirrorPackages(context.Background(), r.ID, 0, []store.Package{{RepoID: r.ID, Filename: "a-1-1.noarch.rpm", Name: "a",
+		Version: "1", Release: "1", Arch: "noarch", SHA256: "s", Size: 1}}, "t"); err != nil {
+		t.Fatal(err)
+	}
+	var got []struct {
+		LastPulled string `json:"last_pulled"`
+	}
+	json.Unmarshal(e.Do("GET", "/api/repos/dev/packages", "").Body.Bytes(), &got)
+	if len(got) != 1 || !strings.HasSuffix(got[0].LastPulled, "Z") {
+		t.Fatalf("%+v", got)
+	}
+}

@@ -55,6 +55,7 @@ type mirrorJSON struct {
 	Include          []string     `json:"include"`
 	Exclude          []string     `json:"exclude"`
 	KeepLatest       int          `json:"keep_latest"`
+	Mode             string       `json:"mode"`
 	Schedule         scheduleJSON `json:"schedule"`
 	State            string       `json:"state"`
 	LastRun          *string      `json:"last_run"`
@@ -76,7 +77,7 @@ func toMirrorJSON(m store.Mirror) mirrorJSON {
 	return mirrorJSON{
 		UpstreamURL: m.UpstreamURL, Username: m.Username, HasCredentials: m.Username != "" || len(m.TokenEnc) > 0,
 		GPGKey: m.GPGKey, RequireSignature: m.RequireSig,
-		Arches: nn(m.Arches), Include: nn(m.Include), Exclude: nn(m.Exclude), KeepLatest: m.KeepLatest,
+		Arches: nn(m.Arches), Include: nn(m.Include), Exclude: nn(m.Exclude), KeepLatest: m.KeepLatest, Mode: m.Mode,
 		Schedule: scheduleJSON{sc.Frequency, sc.TimeOfDay, sc.Timezone, nn(sc.Weekdays), sc.DayOfMonth, sc.Paused},
 		State:    m.State, LastRun: ts(m.LastRun), LastStatus: m.LastStatus, LastError: m.LastError, NextRun: ts(m.NextRun),
 	}
@@ -203,7 +204,7 @@ func mirrorErr(w http.ResponseWriter, err error) {
 	switch {
 	case errors.Is(err, store.ErrNotFound):
 		errJSON(w, 404, "not a mirror")
-	case errors.Is(err, store.ErrBusy), errors.Is(err, store.ErrNotEligible):
+	case errors.Is(err, store.ErrBusy), errors.Is(err, store.ErrNotEligible), errors.Is(err, store.ErrModeChange):
 		errJSON(w, 409, err.Error())
 	default:
 		log.Printf("mirror api: %v", err)
@@ -243,9 +244,14 @@ func (a *Mirrors) put(w http.ResponseWriter, r *http.Request) {
 		Include          []string          `json:"include"`
 		Exclude          []string          `json:"exclude"`
 		KeepLatest       int               `json:"keep_latest"`
+		Mode             *string           `json:"mode"` // omitted keeps the stored mode
 		Schedule         scheduleJSON      `json:"schedule"`
 	}
 	if !decode(w, r, &in) {
+		return
+	}
+	if in.Mode != nil && *in.Mode != store.ModeSync && *in.Mode != store.ModeCache {
+		errJSON(w, 400, `mode must be "sync" or "cache"`)
 		return
 	}
 	isDeb := repo.Kind == store.KindDeb
@@ -347,6 +353,10 @@ func (a *Mirrors) put(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	username, tokenEnc := old.Username, old.TokenEnc
+	mode := old.Mode
+	if in.Mode != nil {
+		mode = *in.Mode
+	}
 	if in.ClearCredentials {
 		username, tokenEnc = "", nil
 	}
@@ -414,7 +424,7 @@ func (a *Mirrors) put(w http.ResponseWriter, r *http.Request) {
 	}
 
 	m := store.Mirror{RepoID: repo.ID, UpstreamURL: u, Username: username, TokenEnc: tokenEnc, GPGKey: key, RequireSig: requireSig,
-		Arches: in.Arches, Include: in.Include, Exclude: in.Exclude, KeepLatest: in.KeepLatest, Schedule: sc, NextRun: next}
+		Arches: in.Arches, Include: in.Include, Exclude: in.Exclude, KeepLatest: in.KeepLatest, Mode: mode, Schedule: sc, NextRun: next}
 	if err := a.Store.SetMirror(ctx, m); err != nil {
 		mirrorErr(w, err)
 		return

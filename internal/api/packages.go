@@ -44,11 +44,13 @@ type pkgJSON struct {
 	AddedAt  string `json:"added_at"`
 	Batch    *int64 `json:"origin_batch_id"`
 	// deb only
-	Component string `json:"component,omitempty"`
+	Component  string `json:"component,omitempty"`
+	LastPulled string `json:"last_pulled"`
 }
 
 func toPkgJSON(p store.Package) pkgJSON {
-	return pkgJSON{p.Filename, p.Name, p.Version, p.Release, p.Arch, p.SHA256, p.Size, p.AddedAt.UTC().Format("2006-01-02T15:04:05Z"), p.OriginBatchID, p.Component}
+	return pkgJSON{p.Filename, p.Name, p.Version, p.Release, p.Arch, p.SHA256, p.Size, p.AddedAt.UTC().Format("2006-01-02T15:04:05Z"), p.OriginBatchID, p.Component,
+		p.LastPulled.UTC().Format("2006-01-02T15:04:05Z")}
 }
 
 func (a *Packages) Routes(mux *http.ServeMux) {
