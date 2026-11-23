@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { archLabel, isOpenPath, pullCommand, sortTags, type RegistryTag } from './registry'
+import { archLabel, defaultLocalName, isOpenPath, pullCommand, sortTags, type RegistryTag } from './registry'
 
 const tag = (name: string, created: string | null): RegistryTag =>
   ({ name, digest: 'sha256:' + name, size: 1, created, arches: [], layers: [], pull: '' })
@@ -36,4 +36,16 @@ describe('sortTags', () => {
 describe('archLabel', () => {
   it('joins platforms', () => expect(archLabel(['linux/amd64', 'linux/arm64'])).toBe('linux/amd64, linux/arm64'))
   it('shows a dash when unknown', () => expect(archLabel([])).toBe('—'))
+})
+
+describe('defaultLocalName', () => {
+  it('drops the registry host and tag; bare names get library/', () => {
+    expect(defaultLocalName('docker.io/plexinc/pms-docker:latest')).toBe('plexinc/pms-docker')
+    expect(defaultLocalName('plexinc/pms-docker')).toBe('plexinc/pms-docker')
+    expect(defaultLocalName('alpine')).toBe('library/alpine')
+    expect(defaultLocalName('alpine:3.20')).toBe('library/alpine')
+    expect(defaultLocalName('ghcr.io/a/b:1')).toBe('a/b')
+    expect(defaultLocalName('localhost:5000/x')).toBe('x')
+    expect(defaultLocalName('  ')).toBe('')
+  })
 })

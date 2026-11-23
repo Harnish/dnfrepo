@@ -25,3 +25,26 @@ export function sortTags(tags: RegistryTag[]): RegistryTag[] {
 export function archLabel(arches: string[]): string {
   return arches.length ? arches.join(', ') : '—'
 }
+
+export interface ImageMirror {
+  id: number; upstream: string; tag: string; local_name: string; platforms: string[]; keep: number
+  username: string; has_credentials: boolean; upstream_digest: string; last_run: string | null; last_status: string; last_error: string
+}
+export interface UpstreamInfo { digest: string; platforms: string[] }
+
+/** Local image name the server will default to: registry host and tag dropped; Docker Hub
+ *  official images get library/. Mirrors imagemirror.Ref.DefaultLocalName for form prefill. */
+export function defaultLocalName(ref: string): string {
+  let s = ref.trim().split('@')[0]
+  if (!s) return ''
+  const parts = s.split('/')
+  const last = parts.length - 1
+  parts[last] = parts[last].split(':')[0]
+  let hub = true
+  if (parts.length > 1 && (parts[0].includes('.') || parts[0].includes(':') || parts[0] === 'localhost')) {
+    hub = parts[0] === 'docker.io' || parts[0] === 'index.docker.io'
+    parts.shift()
+  }
+  s = parts.join('/')
+  return hub && parts.length === 1 ? `library/${s}` : s
+}

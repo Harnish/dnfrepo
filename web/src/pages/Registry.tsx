@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { api, fmtSize } from '../api'
 import type { GCStatus, RegistryRepoRow } from '../registry'
+import ImageMirrors from './ImageMirrors'
 
 export default function Registry() {
   const [repos, setRepos] = useState<RegistryRepoRow[]>([])
@@ -55,6 +56,7 @@ export default function Registry() {
           {repos.length === 0 && <tr><td colSpan={4} className="muted">No images yet. Push one with a push token.</td></tr>}
         </tbody>
       </table>
+      <ImageMirrors onChanged={load} />
       <div className="card">
         <h2>Garbage collection</h2>
         <p className="muted">Removes untagged manifests and unreferenced layers. Pushes are refused while it runs.</p>

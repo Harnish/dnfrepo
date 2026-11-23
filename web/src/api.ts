@@ -34,7 +34,7 @@ export interface MirrorInput {
   schedule?: MirrorSchedule; suite?: string; components?: string[]; mode?: MirrorMode
 }
 
-import type { GCStatus, PublicRepoRow, PushTokenRow, RegistryRepoDetail, RegistryRepoRow, RegistryTag } from './registry'
+import type { GCStatus, ImageMirror, PublicRepoRow, PushTokenRow, RegistryRepoDetail, RegistryRepoRow, RegistryTag, UpstreamInfo } from './registry'
 
 let onUnauthorized: () => void = () => {}
 export function setUnauthorizedHandler(f: () => void) { onUnauthorized = f }
@@ -103,6 +103,12 @@ export const api = {
   deleteRegistryTag: (name: string, tag: string) => req<unknown>('DELETE', `/api/registry/tag?name=${e(name)}&tag=${e(tag)}`),
   startGC: () => req<unknown>('POST', '/api/registry/gc'),
   gcStatus: () => req<GCStatus>('GET', '/api/registry/gc'),
+  imageMirrors: () => req<ImageMirror[]>('GET', '/api/registry/mirrors'),
+  addImageMirror: (v: { upstream: string; local_name: string; platforms: string[]; keep: number; username?: string; token?: string }) => req<ImageMirror>('POST', '/api/registry/mirrors', v),
+  updateImageMirror: (id: number, v: { platforms: string[]; keep: number; username?: string; token?: string }) => req<ImageMirror>('PUT', `/api/registry/mirrors/${id}`, v),
+  deleteImageMirror: (id: number) => req<unknown>('DELETE', `/api/registry/mirrors/${id}`),
+  runImageMirror: (id: number) => req<unknown>('POST', `/api/registry/mirrors/${id}/run`),
+  inspectUpstream: (v: { id: number } | { upstream: string; username?: string; token?: string }) => req<UpstreamInfo>('POST', '/api/registry/mirrors/inspect', v),
   pushTokens: () => req<PushTokenRow[]>('GET', '/api/registry/push-tokens'),
   createPushToken: (name: string) => req<{ id: number; name: string; token: string }>('POST', '/api/registry/push-tokens', { name }),
   revokePushToken: (id: number) => req<unknown>('DELETE', `/api/registry/push-tokens/${id}`),
