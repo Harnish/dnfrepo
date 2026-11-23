@@ -26,6 +26,8 @@ Go web service managing signed dnf/yum repos, with a React admin UI. Features, e
 
 - Deb support is behind `repos.kind` checks (`store.KindDeb`); rpm repos behave exactly as before. A pipeline never mixes kinds. Deb mirrors use `mirror.AptUpstream` and verify Release signatures and index/package hashes before anything is parsed or published.
 
+- Cache mirrors (`mirrors.mode = 'cache'`): the published index is upstream's (rpm `repodata/` verbatim + our `repomd.xml.asc`; deb regenerated from `cache_entries`) and changes only through `pipeline.RefreshCache`; `publish.Rebuild` is a no-op for them, so no caller may assume a rebuild reflects local files. Fills go through `pipeline.IngestBatch` with batch 0 (audit `cached`); `serve` fetches only paths present in `cache_entries`. Retention ranks by `packages.last_pulled`. Mode changes only while the repo has no packages.
+
 - Registry (`REGISTRY_DIR`; off when unset): push is never anonymous (push tokens only) and HTTP `DELETE` is refused for everyone; an anonymous request for a private, ips-denied or nonexistent image gets the identical 401; a name with no settings row is public only while it exists in storage; unlisted public images are hidden from every catalog except push tokens'; credentialed requests count against the Basic-auth throttle before they are checked; GC refuses writes (503) via `Gate` and pulls continue; `/v2/` has no body cap or write timeout (do not add a global write timeout).
 
 ## Known ceilings / deferred
