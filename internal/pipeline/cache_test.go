@@ -79,7 +79,8 @@ func TestRefreshCachePurgesDroppedFromUpstream(t *testing.T) {
 	fill(t, s, "c", h123)
 	fill(t, s, "c", h19)
 	src := t.TempDir()
-	removed, err := s.RefreshCache(ctx, "c", []store.CacheEntry{{Path: "P/" + h19, Href: "P/" + h19, Filename: h19}}, src, "mirror")
+	kept, _ := s.Store.PackageByFilename(ctx, r.ID, h19)
+	removed, err := s.RefreshCache(ctx, "c", []store.CacheEntry{{Path: "P/" + h19, Href: "P/" + h19, Filename: h19, SHA256: kept.SHA256}}, src, "mirror")
 	if err != nil {
 		t.Fatal(err)
 	}

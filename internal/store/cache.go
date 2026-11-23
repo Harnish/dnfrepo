@@ -73,10 +73,11 @@ func (s *Store) ListCacheEntries(ctx context.Context, repoID int64) ([]CacheEntr
 	return out, rows.Err()
 }
 
-// UncachedPackages lists repoID's package filenames that its current index no longer has.
+// UncachedPackages lists repoID's package filenames that its current index no longer has, or
+// has with different content (upstream re-published the name), so the copy is stale.
 func (s *Store) UncachedPackages(ctx context.Context, repoID int64) ([]string, error) {
 	rows, err := s.pool.Query(ctx, `SELECT p.filename FROM packages p WHERE p.repo_id=$1 AND NOT EXISTS
-		(SELECT 1 FROM cache_entries c WHERE c.repo_id=p.repo_id AND c.filename=p.filename) ORDER BY p.filename`, repoID)
+		(SELECT 1 FROM cache_entries c WHERE c.repo_id=p.repo_id AND c.filename=p.filename AND c.sha256=p.sha256) ORDER BY p.filename`, repoID)
 	if err != nil {
 		return nil, err
 	}

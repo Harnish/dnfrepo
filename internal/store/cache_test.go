@@ -94,7 +94,7 @@ func TestUncachedPackages(t *testing.T) {
 	if err := s.AddMirrorPackages(ctx, c.ID, 0, []store.Package{bpkg(c.ID, "x.rpm", nil), bpkg(c.ID, "y.rpm", nil)}, "t"); err != nil {
 		t.Fatal(err)
 	}
-	if err := s.ReplaceCacheEntries(ctx, c.ID, []store.CacheEntry{{Path: "P/y.rpm", Href: "P/y.rpm", Filename: "y.rpm"}}); err != nil {
+	if err := s.ReplaceCacheEntries(ctx, c.ID, []store.CacheEntry{{Path: "P/y.rpm", Href: "P/y.rpm", Filename: "y.rpm", SHA256: "x"}}); err != nil {
 		t.Fatal(err)
 	}
 	got, err := s.UncachedPackages(ctx, c.ID)
@@ -154,5 +154,22 @@ func TestIsCacheRepo(t *testing.T) {
 		if got, err := s.IsCacheRepo(ctx, id); err != nil || got != want {
 			t.Errorf("repo %d: %v %v", id, got, err)
 		}
+	}
+}
+
+// Upstream re-publishing a file under the same name with new content makes the cached copy stale.
+func TestUncachedPackagesIncludesChangedContent(t *testing.T) {
+	s := storetest.New(t)
+	ctx := context.Background()
+	c := cacheMirror(t, s, "c")
+	if err := s.AddMirrorPackages(ctx, c.ID, 0, []store.Package{bpkg(c.ID, "x.rpm", nil)}, "t"); err != nil { // sha "x"
+		t.Fatal(err)
+	}
+	if err := s.ReplaceCacheEntries(ctx, c.ID, []store.CacheEntry{{Path: "P/x.rpm", Href: "P/x.rpm", Filename: "x.rpm", SHA256: "new"}}); err != nil {
+		t.Fatal(err)
+	}
+	got, err := s.UncachedPackages(ctx, c.ID)
+	if err != nil || !reflect.DeepEqual(got, []string{"x.rpm"}) {
+		t.Fatalf("%v %v", got, err)
 	}
 }
