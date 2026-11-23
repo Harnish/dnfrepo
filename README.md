@@ -15,6 +15,17 @@ A web service that manages signed dnf/yum repositories: upload rpms or pull them
 - Browse page, `<slug>.repo` file and RSS feed per repo, all under that repo's access rule.
 - React admin UI and a JSON API under `/api`.
 
+## Screenshots
+
+| | |
+|---|---|
+| ![Repo list with the new-repo form](docs/screenshots/repos.jpg) | ![Packages tab sorted by size, with filter box](docs/screenshots/packages.jpg) |
+| Repos | Packages: sortable columns, filter, paging |
+| ![Sources tab filtered to one owner](docs/screenshots/sources.jpg) | ![Activity log for a repo](docs/screenshots/activity.jpg) |
+| Sources: GitHub and Plex, filtered | Activity |
+| ![Container registry page](docs/screenshots/registry.jpg) | |
+| Container registry | |
+
 ## Run
 
 ```
