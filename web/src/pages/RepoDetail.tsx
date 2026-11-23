@@ -3,12 +3,13 @@ import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom'
 import { byLastPulled, nextMirrorFor } from '../mirrorState'
 import MirrorPanel from './MirrorPanel'
 import BatchTable from './BatchTable'
+import { Pager, usePaged } from './Pager'
 import { api, ApiError, AuditEvent, Batch, fmtSize, Mode, Pkg, Repo, RepoUser, Source, sourcesListLine } from '../api'
 
 export default function RepoDetail() {
   const { slug = '' } = useParams()
   const nav = useNavigate()
-  const [params] = useSearchParams()
+  const [params, setParams] = useSearchParams()
   const [repos, setRepos] = useState<Repo[]>([])
   const [pkgs, setPkgs] = useState<Pkg[]>([])
   const [batches, setBatches] = useState<Batch[]>([])
@@ -27,6 +28,7 @@ export default function RepoDetail() {
   const [keep, setKeep] = useState(0)
   const [rules, setRules] = useState<{ name: string; keep: number }[]>([])
 
+  const mirrorParam = params.get('mirror') === '1'
   const repo = repos.find((r) => r.slug === slug)
   const next = repos.find((r) => r.previous === slug)
   const deb = repo?.kind === 'deb'
@@ -34,6 +36,20 @@ export default function RepoDetail() {
   const isMirror = mirrorFor === slug && first
   const cache = isMirror && cacheFor === slug
   const shown = cache ? byLastPulled(pkgs) : pkgs
+  const pkgPg = usePaged(shown)
+  const srcPg = usePaged(sources)
+  const auditPg = usePaged(audit)
+
+  const showBatches = !isMirror && batches.length > 0
+  const tabs: [string, string][] = [
+    ['packages', `Packages (${pkgs.length})`],
+    ...(first && !isMirror ? [['sources', `Sources (${sources.length})`] as [string, string]] : []),
+    ...(isMirror ? [['mirror', 'Mirror'] as [string, string]] : []),
+    ...(showBatches ? [['batches', `Batches (${batches.length})`] as [string, string]] : []),
+    ['access', 'Access'], ['retention', 'Retention'], ['activity', 'Activity'], ['pipeline', 'Pipeline'],
+  ]
+  const tab = tabs.some(([k]) => k === params.get('tab')) ? params.get('tab')! : 'packages'
+  const setTab = (k: string) => setParams((p) => { const n = new URLSearchParams(p); n.set('tab', k); return n }, { replace: true })
 
   const run = async (f: () => Promise<unknown>, ok = '') => {
     setErr(''); setMsg('')
@@ -57,13 +73,13 @@ export default function RepoDetail() {
       // 404 = not a mirror; a freshly created "mirror" repo (?mirror=1) shows the empty form
       const mc = await api.mirror(slug).then((c) => c, (x) => { if (x instanceof ApiError && x.status === 404) return null; throw x })
       setCacheFor(mc?.mode === 'cache' ? slug : null)
-      setMirrorFor((was) => nextMirrorFor(was, slug, true, mc !== null, params.get('mirror') === '1'))
+      setMirrorFor((was) => nextMirrorFor(was, slug, true, mc !== null, mirrorParam))
     }
     if (r.mode === 'users') {
       setUsers(await api.repoUsers())
       setGranted((await api.repoGrants(slug)).user_ids)
     }
-  }, [slug, params])
+  }, [slug, mirrorParam])
   useEffect(() => { load().catch((x) => setErr(x.message)) }, [load])
 
   if (!repo) return <p className="muted">{err || 'Loading…'}</p>
@@ -99,11 +115,17 @@ export default function RepoDetail() {
       {err && <p className="error">{err}</p>}
       {msg && <p className="ok">{msg}</p>}
 
-      <h2>Packages</h2>
+      <nav className="tabs" role="tablist">
+        {tabs.map(([k, label]) => (
+          <button key={k} type="button" role="tab" aria-selected={tab === k} className={tab === k ? 'active' : ''} onClick={() => setTab(k)}>{label}</button>
+        ))}
+      </nav>
+
+      {tab === 'packages' && <>
       <table>
         <thead><tr><th /><th>Name</th><th>Version</th><th>Arch</th>{deb && <th>Component</th>}<th>Size</th>{cache && <th>Last pulled</th>}<th>File</th><th /></tr></thead>
         <tbody>
-          {shown.map((p) => (
+          {pkgPg.items.map((p) => (
             <tr key={p.filename}>
               <td><input type="checkbox" checked={selected.has(p.filename)} onChange={() => toggle(p.filename)} aria-label={`select ${p.filename}`} /></td>
               <td>{p.name}</td><td>{deb ? p.version : `${p.version}-${p.release}`}</td><td>{p.arch}</td>{deb && <td>{p.component}</td>}<td>{fmtSize(p.size)}</td>{cache && <td>{new Date(p.last_pulled).toLocaleString()}</td>}
@@ -114,6 +136,7 @@ export default function RepoDetail() {
           {pkgs.length === 0 && <tr><td colSpan={(deb ? 8 : 7) + (cache ? 1 : 0)} className="muted">{cache ? 'Nothing cached yet: packages are stored when a host first downloads them.' : 'No packages.'}</td></tr>}
         </tbody>
       </table>
+      <Pager {...pkgPg} />
       <div className="row">
         {next && (
           <button className="primary" disabled={selected.size === 0}
@@ -133,9 +156,9 @@ export default function RepoDetail() {
         {first && isMirror && <span className="muted">{cache ? 'Packages are cached on first download.' : 'Packages arrive by sync.'}</span>}
         {!first && <span className="muted">Packages arrive here only by promotion.</span>}
       </div>
+      </>}
 
-      <h2>Access</h2>
-      <form className="card" onSubmit={saveAccess}>
+      {tab === 'access' && <form className="card" onSubmit={saveAccess}>
         <label>Who can pull
           <select value={mode} onChange={(e) => setMode(e.target.value as Mode)}>
             <option value="public">anyone (public)</option><option value="ips">only these IPs</option><option value="users">only these users</option>
@@ -153,10 +176,9 @@ export default function RepoDetail() {
           </fieldset>
         )}
         <button className="primary">Save access</button>
-      </form>
+      </form>}
 
-      <h2>Retention</h2>
-      <form className="card" onSubmit={(ev) => {
+      {tab === 'retention' && <form className="card" onSubmit={(ev) => {
         ev.preventDefault()
         run(async () => {
           const overrides = Object.fromEntries(rules.filter((r) => r.name.trim()).map((r) => [r.name.trim(), r.keep]))
@@ -184,15 +206,14 @@ export default function RepoDetail() {
           <button type="button" onClick={() => setRules([...rules, { name: '', keep: 1 }])}>Add per-package limit</button>
           <button className="primary">Save &amp; apply</button>
         </div>
-      </form>
+      </form>}
 
-      {first && !isMirror && (
+      {tab === 'sources' && (
         <>
-          <h2>Sources</h2>
           <table>
             <thead><tr><th>Kind</th><th>Spec</th><th>Last run</th><th>Status</th><th /></tr></thead>
             <tbody>
-              {sources.map((s) => (
+              {srcPg.items.map((s) => (
                 <tr key={s.id}>
                   <td>{s.kind}</td><td>{s.spec || '—'}</td><td>{s.last_run ?? 'never'}</td>
                   <td>{s.last_status}{s.last_error && <span className="error"> {s.last_error}</span>}</td>
@@ -205,6 +226,7 @@ export default function RepoDetail() {
               {sources.length === 0 && <tr><td colSpan={5} className="muted">No sources.</td></tr>}
             </tbody>
           </table>
+          <Pager {...srcPg} />
           <form className="row" onSubmit={(ev) => { ev.preventDefault(); run(async () => { await api.addSource(slug, src.kind, src.spec); setSrc({ ...src, spec: '' }); await load() }) }}>
             <select value={src.kind} onChange={(e) => setSrc({ ...src, kind: e.target.value })}>
               <option value="github">GitHub release</option>{!deb && <option value="plex">Plex Media Server</option>}
@@ -212,34 +234,37 @@ export default function RepoDetail() {
             {src.kind === 'github' && <input value={src.spec} onChange={(e) => setSrc({ ...src, spec: e.target.value })} placeholder="owner/name or github.com URL" required />}
             <button>Add source</button>
           </form>
+          {pkgs.length === 0 && sources.length === 0 && (
+            <p><button onClick={() => { setMirrorFor(slug); setTab('mirror') }}>Make this a mirror</button></p>
+          )}
         </>
       )}
 
-      {isMirror && <MirrorPanel slug={slug} deb={deb} next={next?.name} onChanged={load} />}
+      {tab === 'mirror' && <MirrorPanel slug={slug} deb={deb} next={next?.name} onChanged={load} />}
       {/* batches promoted into a later stage (or left on a former mirror) stay promotable */}
-      {!isMirror && batches.length > 0 && (
+      {tab === 'batches' && (
         <BatchTable batches={batches} next={next?.name} onPromote={(b) => next && confirm(`Promote every package from batch ${b.id} to ${next.name}?`) && run(async () => {
           const r = await api.promoteBatch(slug, b.id)
           await load()
           setMsg(`Promoted ${r.promoted.length} to ${r.to}` + (r.skipped.length ? `, ${r.skipped.length} already there` : ''))
         })} />
       )}
-      {first && !isMirror && pkgs.length === 0 && sources.length === 0 && (
-        <p><button onClick={() => setMirrorFor(slug)}>Make this a mirror</button></p>
-      )}
-
-      <h2>Pipeline</h2>
+      {tab === 'pipeline' && <>
       <div className="row">
         {repo.previous && <button onClick={() => run(async () => { await api.setPrevious(slug, null); await load() })}>Unlink from {repo.previous}</button>}
         <button onClick={() => confirm(`Delete repo ${slug} and its files?`) && run(async () => { await api.deleteRepo(slug); nav('/') })}>Delete repo</button>
       </div>
       <p className="muted">A repo in the middle of a chain can't be deleted until it's unlinked.</p>
+      </>}
 
-      <h2>Activity</h2>
+      {tab === 'activity' && <>
       <ul className="audit">
-        {audit.map((a) => <li key={a.id}><span className="muted">{a.at}</span> {a.action} <code>{a.detail}</code> <span className="muted">by {a.actor}</span></li>)}
+        {auditPg.items.map((a) => <li key={a.id}><span className="muted">{a.at}</span> {a.action} <code>{a.detail}</code> <span className="muted">by {a.actor}</span></li>)}
         {audit.length === 0 && <li className="muted">Nothing yet.</li>}
       </ul>
+      <Pager {...auditPg} />
+      {audit.length >= 100 && <p className="muted">Shows the newest 100 events.</p>}
+      </>}
     </>
   )
 }
