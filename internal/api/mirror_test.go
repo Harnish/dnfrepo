@@ -475,3 +475,24 @@ func TestPackagesHaveLastPulled(t *testing.T) {
 		t.Fatalf("%+v", got)
 	}
 }
+
+// Stopping a cache mirror must drop upstream's index: the repo then publishes its local files.
+func TestDeleteCacheMirrorRebuildsAndClearsEntries(t *testing.T) {
+	e, m, _ := mirrorEnv(t)
+	var rebuilt []string
+	m.OnChange = func(slug string) { rebuilt = append(rebuilt, slug) }
+	r := mkRepo(t, e, "dev", "")
+	putMirror(t, e, "dev", `{"upstream_url":"https://h/x/","mode":"cache"}`, 200)
+	if err := e.St.ReplaceCacheEntries(context.Background(), r.ID, []store.CacheEntry{{Path: "P/a.rpm", Href: "P/a.rpm", Filename: "a.rpm"}}); err != nil {
+		t.Fatal(err)
+	}
+	if w := e.Do("DELETE", "/api/repos/dev/mirror", ""); w.Code != 200 {
+		t.Fatalf("%d %s", w.Code, w.Body)
+	}
+	if es, _ := e.St.ListCacheEntries(context.Background(), r.ID); len(es) != 0 {
+		t.Fatalf("entries left %v", es)
+	}
+	if len(rebuilt) != 1 || rebuilt[0] != "dev" {
+		t.Fatalf("rebuilt %v", rebuilt)
+	}
+}

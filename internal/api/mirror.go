@@ -24,7 +24,7 @@ type Mirrors struct {
 	Box      *secretbox.Box // nil when SECRET_KEY is unset: credentials are then refused
 	Client   *http.Client   // resolves metalink/mirrorlist/gpgkey on PUT; default 30s timeout
 	Actor    func(*http.Request) string
-	OnChange func(slug string) // rebuild after deb settings change; wired to Publisher.Rebuild
+	OnChange func(slug string) // rebuild after deb settings change or a cache mirror is removed; wired to Publisher.Rebuild
 }
 
 var resolveClient = &http.Client{Timeout: 30 * time.Second}
@@ -158,11 +158,19 @@ func (a *Mirrors) Routes(mux *http.ServeMux) {
 			errJSON(w, 404, "not found")
 			return
 		}
+		wasCache, err := a.Store.IsCacheRepo(r.Context(), repo.ID)
+		if err != nil {
+			mirrorErr(w, err)
+			return
+		}
 		if err := a.Store.DeleteMirror(r.Context(), repo.ID); err != nil {
 			mirrorErr(w, err)
 			return
 		}
 		a.audit(r, repo.ID, "mirror-removed", "")
+		if wasCache && a.OnChange != nil { // replace upstream's index with one of the cached files
+			a.OnChange(repo.Slug)
+		}
 		writeJSON(w, 200, map[string]string{"status": "deleted"})
 	})
 	// Sync writes are attributed to mirror:<slug> (as scheduled runs are); the admin who

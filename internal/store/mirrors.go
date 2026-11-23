@@ -129,11 +129,23 @@ func (s *Store) MirrorByRepo(ctx context.Context, repoID int64) (Mirror, error) 
 	return scanMirror(s.pool.QueryRow(ctx, `SELECT `+mirrorCols+` FROM mirrors WHERE repo_id=$1`, repoID))
 }
 
-// DeleteMirror removes an idle mirror's config: ErrBusy while a sync runs, ErrNotFound if not a mirror.
+// DeleteMirror removes an idle mirror's config, and a cache mirror's upstream index entries:
+// ErrBusy while a sync runs, ErrNotFound if not a mirror.
 func (s *Store) DeleteMirror(ctx context.Context, repoID int64) error {
-	tag, err := s.pool.Exec(ctx, `DELETE FROM mirrors WHERE repo_id=$1 AND state='idle'`, repoID)
-	if err != nil || tag.RowsAffected() == 1 {
+	tx, err := s.pool.Begin(ctx)
+	if err != nil {
 		return err
+	}
+	defer tx.Rollback(ctx)
+	tag, err := tx.Exec(ctx, `DELETE FROM mirrors WHERE repo_id=$1 AND state='idle'`, repoID)
+	if err != nil {
+		return err
+	}
+	if tag.RowsAffected() == 1 {
+		if _, err := tx.Exec(ctx, `DELETE FROM cache_entries WHERE repo_id=$1`, repoID); err != nil {
+			return err
+		}
+		return tx.Commit(ctx)
 	}
 	if ok, err := s.IsMirror(ctx, repoID); err != nil {
 		return err
