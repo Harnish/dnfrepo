@@ -31,3 +31,4 @@ fieldset { border:1px solid var(--line); border-radius:6px; margin:.5rem 0; }
 .tabs button { border:1px solid transparent; border-bottom:none; border-radius:6px 6px 0 0; background:none; margin-bottom:-1px; }
 .tabs button.active { border-color:var(--line); background:var(--card); font-weight:600; }
 .pager { align-items:center; }
+.nw, td button { white-space:nowrap; overflow-wrap:normal; }

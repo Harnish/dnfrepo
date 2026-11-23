@@ -128,7 +128,7 @@ export default function RepoDetail() {
           {pkgPg.items.map((p) => (
             <tr key={p.filename}>
               <td><input type="checkbox" checked={selected.has(p.filename)} onChange={() => toggle(p.filename)} aria-label={`select ${p.filename}`} /></td>
-              <td>{p.name}</td><td>{deb ? p.version : `${p.version}-${p.release}`}</td><td>{p.arch}</td>{deb && <td>{p.component}</td>}<td>{fmtSize(p.size)}</td>{cache && <td>{new Date(p.last_pulled).toLocaleString()}</td>}
+              <td>{p.name}</td><td className="nw">{deb ? p.version : `${p.version}-${p.release}`}</td><td className="nw">{p.arch}</td>{deb && <td className="nw">{p.component}</td>}<td className="nw">{fmtSize(p.size)}</td>{cache && <td className="nw">{new Date(p.last_pulled).toLocaleString()}</td>}
               <td><a href={deb ? `/r/${slug}/pool/${p.component}/${p.filename}` : `/r/${slug}/${p.filename}`}>{p.filename}</a></td>
               <td><button onClick={() => confirm(`Delete ${p.filename}?`) && run(async () => { await api.deletePackage(slug, p.filename); await load() })}>Delete</button></td>
             </tr>
