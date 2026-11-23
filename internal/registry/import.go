@@ -126,3 +126,17 @@ func (r *Registry) TagDigest(ctx context.Context, name, tag string) (string, err
 	}
 	return d.Digest.String(), nil
 }
+
+// HasBlob reports whether blob dg is already linked into image name (so an import can skip it).
+func (r *Registry) HasBlob(ctx context.Context, name, dg string) bool {
+	d, err := digest.Parse(dg)
+	if err != nil {
+		return false
+	}
+	rp, err := r.repository(ctx, name)
+	if err != nil {
+		return false
+	}
+	_, err = rp.Blobs(ctx).Stat(ctx, d)
+	return err == nil
+}
