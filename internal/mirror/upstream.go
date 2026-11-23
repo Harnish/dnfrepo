@@ -11,7 +11,9 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"os"
 	"path"
+	"path/filepath"
 	"regexp"
 	"strings"
 
@@ -94,50 +96,133 @@ type hrefXML struct {
 	Href string `xml:"href,attr"`
 }
 
-// Packages fetches repomd.xml (verifying its signature when a key is set), then
-// the primary metadata (verified against repomd's sha256), and returns every
-// package. Any unsafe or unsupported entry fails the whole call.
-func (u *Upstream) Packages(ctx context.Context) ([]UpstreamPkg, error) {
+type dataXML struct {
+	Type     string      `xml:"type,attr"`
+	Checksum checksumXML `xml:"checksum"`
+	Location hrefXML     `xml:"location"`
+}
+
+// repomd fetches repomd.xml, verifying its signature when a key is set, and returns it with
+// its data entries.
+func (u *Upstream) repomd(ctx context.Context) ([]byte, []dataXML, error) {
 	if !isHTTP(u.Base) {
-		return nil, fmt.Errorf("upstream %s: only http and https are supported", redact(u.Base))
+		return nil, nil, fmt.Errorf("upstream %s: only http and https are supported", redact(u.Base))
 	}
 	if u.RequireSig && u.GPGKey == "" {
-		return nil, errors.New("upstream requires a signature but no GPG key is configured")
+		return nil, nil, errors.New("upstream requires a signature but no GPG key is configured")
 	}
 	md, err := u.fetch(ctx, "repodata/repomd.xml", maxBody)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	if u.GPGKey != "" {
 		asc, err := u.fetch(ctx, "repodata/repomd.xml.asc", maxSig)
 		if err != nil {
-			return nil, err
+			return nil, nil, err
 		}
 		kr, err := openpgp.ReadArmoredKeyRing(strings.NewReader(u.GPGKey))
 		if err != nil {
-			return nil, fmt.Errorf("upstream GPG key: %w", err)
+			return nil, nil, fmt.Errorf("upstream GPG key: %w", err)
 		}
 		if _, err := openpgp.CheckArmoredDetachedSignature(kr, bytes.NewReader(md), bytes.NewReader(asc), nil); err != nil {
-			return nil, fmt.Errorf("%s: signature: %w", redact(u.url("repodata/repomd.xml.asc")), err)
+			return nil, nil, fmt.Errorf("%s: signature: %w", redact(u.url("repodata/repomd.xml.asc")), err)
 		}
 	}
-
 	var doc struct {
-		Data []struct {
-			Type     string      `xml:"type,attr"`
-			Checksum checksumXML `xml:"checksum"`
-			Location hrefXML     `xml:"location"`
-		} `xml:"data"`
+		Data []dataXML `xml:"data"`
 	}
 	if err := xml.Unmarshal(md, &doc); err != nil {
-		return nil, fmt.Errorf("parse repomd.xml: %w", err)
+		return nil, nil, fmt.Errorf("parse repomd.xml: %w", err)
 	}
-	for _, d := range doc.Data {
+	return md, doc.Data, nil
+}
+
+// Packages fetches repomd.xml (verifying its signature when a key is set), then
+// the primary metadata (verified against repomd's sha256), and returns every
+// package. Any unsafe or unsupported entry fails the whole call.
+func (u *Upstream) Packages(ctx context.Context) ([]UpstreamPkg, error) {
+	_, data, err := u.repomd(ctx)
+	if err != nil {
+		return nil, err
+	}
+	for _, d := range data {
 		if d.Type == "primary" {
 			return u.primary(ctx, d.Location.Href, d.Checksum)
 		}
 	}
 	return nil, errors.New("repomd.xml has no primary metadata")
+}
+
+// repodataName is a safe file name directly under repodata/.
+var repodataName = regexp.MustCompile(`^repodata/([A-Za-z0-9][A-Za-z0-9._+~-]*)$`)
+
+// FetchRepodata copies upstream's verified repodata into dir for a cache repo: repomd.xml
+// (signature checked as in Packages) and every data file it lists, each checked against its
+// sha256. It returns the packages of the primary metadata. Only repodata/<name> locations are
+// accepted, since the copy is served from the repo's own repodata/.
+func (u *Upstream) FetchRepodata(ctx context.Context, dir string) ([]UpstreamPkg, error) {
+	md, data, err := u.repomd(ctx)
+	if err != nil {
+		return nil, err
+	}
+	limit := u.maxPrimaryBytes
+	if limit == 0 {
+		limit = 1 << 30
+	}
+	var primary *dataXML
+	for i, d := range data {
+		m := repodataName.FindStringSubmatch(d.Location.Href)
+		if m == nil || m[1] == "repomd.xml" || m[1] == "repomd.xml.asc" {
+			return nil, fmt.Errorf("repomd.xml: unsupported location %q", d.Location.Href)
+		}
+		if d.Checksum.Type != "sha256" {
+			return nil, fmt.Errorf("%s: unsupported checksum type %q", d.Location.Href, d.Checksum.Type)
+		}
+		if err := u.saveVerified(ctx, d.Location.Href, d.Checksum.Value, limit, filepath.Join(dir, m[1])); err != nil {
+			return nil, err
+		}
+		if d.Type == "primary" {
+			primary = &data[i]
+		}
+	}
+	if primary == nil {
+		return nil, errors.New("repomd.xml has no primary metadata")
+	}
+	if err := os.WriteFile(filepath.Join(dir, "repomd.xml"), md, 0o644); err != nil {
+		return nil, err
+	}
+	f, err := os.Open(filepath.Join(dir, path.Base(primary.Location.Href)))
+	if err != nil {
+		return nil, err
+	}
+	defer f.Close()
+	return u.parsePrimary(f, primary.Location.Href, primary.Checksum)
+}
+
+// saveVerified downloads href to dst (mode 0644), failing on more than limit bytes or a sha256
+// other than want.
+func (u *Upstream) saveVerified(ctx context.Context, href, want string, limit int64, dst string) error {
+	body, err := u.get(ctx, href)
+	if err != nil {
+		return err
+	}
+	defer body.Close()
+	f, err := os.OpenFile(dst, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o644)
+	if err != nil {
+		return err
+	}
+	h := sha256.New()
+	_, err = io.Copy(io.MultiWriter(f, h), &capReader{r: body, left: limit, max: limit})
+	if cerr := f.Close(); err == nil {
+		err = cerr
+	}
+	if err != nil {
+		return fmt.Errorf("GET %s: %w", redact(u.url(href)), err)
+	}
+	if got := hex.EncodeToString(h.Sum(nil)); !strings.EqualFold(got, strings.TrimSpace(want)) {
+		return fmt.Errorf("%s: %w", redact(u.url(href)), ErrChecksum)
+	}
+	return nil
 }
 
 // capReader fails once more than left bytes are read.
@@ -162,15 +247,24 @@ func (u *Upstream) primary(ctx context.Context, href string, sum checksumXML) ([
 	if !safeHref(href) {
 		return nil, errors.New("primary metadata: unsafe location")
 	}
-	limit := u.maxPrimaryBytes
-	if limit == 0 {
-		limit = 1 << 30
-	}
 	body, err := u.get(ctx, href)
 	if err != nil {
 		return nil, err
 	}
 	defer body.Close()
+	return u.parsePrimary(body, href, sum)
+}
+
+// parsePrimary reads primary metadata (compressed as href's extension says) from body,
+// verifying it against sum, and returns its packages.
+func (u *Upstream) parsePrimary(body io.Reader, href string, sum checksumXML) ([]UpstreamPkg, error) {
+	if sum.Type != "sha256" {
+		return nil, fmt.Errorf("primary metadata: unsupported checksum type %q", sum.Type)
+	}
+	limit := u.maxPrimaryBytes
+	if limit == 0 {
+		limit = 1 << 30
+	}
 	h := sha256.New()
 	raw := io.TeeReader(&capReader{r: body, left: limit, max: limit}, h)
 

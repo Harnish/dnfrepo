@@ -130,21 +130,12 @@ func (s *Syncer) run(ctx context.Context, repoID int64, actor string, token *str
 			return Result{}, errors.New("cannot decrypt stored mirror credentials")
 		}
 	}
-	maxRPM := s.MaxRPMBytes
-	if maxRPM <= 0 {
-		maxRPM = defaultMaxRPM
+	up, filter, err := s.source(ctx, m, repo, *token)
+	if err != nil {
+		return Result{}, err
 	}
-	var up packageSource = &Upstream{Base: m.UpstreamURL, Client: s.Client, Username: m.Username, Token: *token,
-		GPGKey: m.GPGKey, RequireSig: m.RequireSig, MaxRPMBytes: maxRPM}
-	filter := Filter{Arches: m.Arches, Include: m.Include, Exclude: m.Exclude, KeepLatest: m.KeepLatest}
-	if repo.Kind == store.KindDeb {
-		d, err := s.Store.DebRepoByID(ctx, repoID)
-		if err != nil {
-			return Result{}, err
-		}
-		up = &AptUpstream{Base: m.UpstreamURL, Suite: d.Suite, Components: d.Components, Arches: d.Arches, Client: s.Client,
-			Username: m.Username, Token: *token, GPGKey: m.GPGKey, RequireSig: m.RequireSig, MaxDebBytes: maxRPM}
-		filter.Arches, filter.Compare = d.Arches, debCompare
+	if m.Mode == store.ModeCache {
+		return s.refresh(ctx, repo, up, actor)
 	}
 
 	all, err := up.Packages(ctx)
@@ -207,6 +198,27 @@ func (s *Syncer) run(ctx context.Context, repoID int64, actor string, token *str
 		os.Remove(f.Path) // the published copy is a separate link (or copy)
 	}
 	return Result{Status: "synced", BatchID: *batchID, Added: len(pkgs)}, err
+}
+
+// source builds the upstream reader and sync filter for a mirror; token is the opened credential.
+func (s *Syncer) source(ctx context.Context, m store.Mirror, repo store.Repo, token string) (packageSource, Filter, error) {
+	maxRPM := s.MaxRPMBytes
+	if maxRPM <= 0 {
+		maxRPM = defaultMaxRPM
+	}
+	var up packageSource = &Upstream{Base: m.UpstreamURL, Client: s.Client, Username: m.Username, Token: token,
+		GPGKey: m.GPGKey, RequireSig: m.RequireSig, MaxRPMBytes: maxRPM}
+	filter := Filter{Arches: m.Arches, Include: m.Include, Exclude: m.Exclude, KeepLatest: m.KeepLatest}
+	if repo.Kind == store.KindDeb {
+		d, err := s.Store.DebRepoByID(ctx, repo.ID)
+		if err != nil {
+			return nil, Filter{}, err
+		}
+		up = &AptUpstream{Base: m.UpstreamURL, Suite: d.Suite, Components: d.Components, Arches: d.Arches, Client: s.Client,
+			Username: m.Username, Token: token, GPGKey: m.GPGKey, RequireSig: m.RequireSig, MaxDebBytes: maxRPM}
+		filter.Arches, filter.Compare = d.Arches, debCompare
+	}
+	return up, filter, nil
 }
 
 // dedupe drops repeated filenames with the same content; differing content fails.

@@ -26,6 +26,8 @@ type syncPub struct {
 	mu       sync.Mutex
 	rebuilds int
 	err      error
+	swaps    []map[string][]byte  // SwapRepodata calls
+	apt      [][]aptindex.Package // PublishApt calls
 }
 
 func (p *syncPub) RepoDir(slug string) string { return filepath.Join(p.dir, slug) }
@@ -35,8 +37,28 @@ func (p *syncPub) Rebuild(ctx context.Context, slug string) error {
 	p.rebuilds++
 	return p.err
 }
-func (p *syncPub) SwapRepodata(slug, src string) error { return nil }
-func (p *syncPub) PublishApt(context.Context, store.Repo, []aptindex.Package) error {
+
+// SwapRepodata records the swapped-in repodata (file name -> bytes) and consumes src.
+func (p *syncPub) SwapRepodata(slug, src string) error {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	files := map[string][]byte{}
+	ents, err := os.ReadDir(src)
+	if err != nil {
+		return err
+	}
+	for _, e := range ents {
+		b, _ := os.ReadFile(filepath.Join(src, e.Name()))
+		files[e.Name()] = b
+	}
+	p.swaps = append(p.swaps, files)
+	return os.RemoveAll(src)
+}
+
+func (p *syncPub) PublishApt(_ context.Context, _ store.Repo, pkgs []aptindex.Package) error {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.apt = append(p.apt, pkgs)
 	return nil
 }
 

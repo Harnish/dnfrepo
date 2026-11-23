@@ -165,6 +165,9 @@ func (f *fakeUpstream) compress(raw []byte) []byte {
 	return buf.Bytes()
 }
 
+// fakeFilelists is the body of the filelists entry repomd lists (opaque to the mirror).
+var fakeFilelists = []byte("filelists-body")
+
 func (f *fakeUpstream) primary() []byte { return f.compress(f.primaryXML(f.Pkgs)) }
 
 func (f *fakeUpstream) repomd() []byte {
@@ -183,7 +186,7 @@ func (f *fakeUpstream) repomd() []byte {
     <size>%d</size>
   </data>
 </repomd>
-`, strings.Repeat("0", 64), f.ChecksumType, sum(p), sum(f.primaryXML(f.Pkgs)), f.primaryHref(), len(p)))
+`, sum(fakeFilelists), f.ChecksumType, sum(p), sum(f.primaryXML(f.Pkgs)), f.primaryHref(), len(p)))
 }
 
 func (f *fakeUpstream) serve(w http.ResponseWriter, r *http.Request) {
@@ -223,6 +226,9 @@ func (f *fakeUpstream) serve(w http.ResponseWriter, r *http.Request) {
 			f.t.Error(err)
 		}
 		w.Write(sig.Bytes())
+		return
+	case "repodata/filelists.xml.gz":
+		w.Write(fakeFilelists)
 		return
 	case f.primaryHref():
 		if f.TamperPrimary {
