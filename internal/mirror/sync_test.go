@@ -3,6 +3,7 @@ package mirror
 import (
 	"bytes"
 	"context"
+	"dnfrepo/internal/aptindex"
 	"errors"
 	"log"
 	"net/http"
@@ -33,6 +34,10 @@ func (p *syncPub) Rebuild(ctx context.Context, slug string) error {
 	defer p.mu.Unlock()
 	p.rebuilds++
 	return p.err
+}
+func (p *syncPub) SwapRepodata(slug, src string) error { return nil }
+func (p *syncPub) PublishApt(context.Context, store.Repo, []aptindex.Package) error {
+	return nil
 }
 
 type syncEnv struct {

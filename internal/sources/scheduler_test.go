@@ -2,6 +2,7 @@ package sources
 
 import (
 	"context"
+	"dnfrepo/internal/aptindex"
 	"errors"
 	"net/http"
 	"net/http/httptest"
@@ -26,6 +27,10 @@ func (f *fakePub) Rebuild(context.Context, string) error {
 	f.mu.Lock()
 	f.n++
 	f.mu.Unlock()
+	return nil
+}
+func (f *fakePub) SwapRepodata(string, string) error { return nil }
+func (f *fakePub) PublishApt(context.Context, store.Repo, []aptindex.Package) error {
 	return nil
 }
 

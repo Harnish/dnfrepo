@@ -3,6 +3,8 @@ package api
 import (
 	"bytes"
 	"context"
+	"dnfrepo/internal/aptindex"
+	"dnfrepo/internal/store"
 	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
@@ -17,6 +19,10 @@ type nopPub struct{ dir string }
 
 func (n nopPub) RepoDir(slug string) string                     { return filepath.Join(n.dir, "repos", slug) }
 func (n nopPub) Rebuild(ctx context.Context, slug string) error { return nil }
+func (n nopPub) SwapRepodata(slug, src string) error            { return nil }
+func (n nopPub) PublishApt(context.Context, store.Repo, []aptindex.Package) error {
+	return nil
+}
 
 func upload(e *env, slug, filename string, body []byte) *httptest.ResponseRecorder {
 	var buf bytes.Buffer
