@@ -11,7 +11,6 @@ import (
 	"dnfrepo/internal/debmeta"
 	"dnfrepo/internal/debmeta/debtest"
 	"dnfrepo/internal/pipeline"
-	"dnfrepo/internal/sources"
 )
 
 func debAPIEnv(t *testing.T) (*env, string, *[]string) {
@@ -24,7 +23,7 @@ func debAPIEnv(t *testing.T) (*env, string, *[]string) {
 	pk := &Packages{Pipeline: pl, Actor: func(*http.Request) string { return "admin@x.org" }}
 	pk.Routes(e.Mux)
 	pk.RoutesPromote(e.Mux)
-	(&Sources{Store: e.St, Scheduler: &sources.Scheduler{}}).Routes(e.Mux)
+	(&Sources{Store: e.St}).Routes(e.Mux)
 	return e, dir, hooked
 }
 

@@ -7,7 +7,7 @@ A web service that manages signed dnf/yum repositories: upload rpms or pull them
 - Many repos, each served at `/r/<slug>/` with `createrepo_c` metadata signed by an instance GPG key (`repo_gpgcheck=1`).
 - **Pipelines:** link repos in a chain. Only the first repo takes uploads and sources; later repos get packages only by promoting from the previous one (one or many rpms per promotion, all-or-nothing).
 - **Access, one mode per repo:** `public`, `ips` (IP/CIDR allowlist), or `users` (HTTP Basic auth with per-user tokens).
-- **Sources** (first stage only): GitHub latest-release rpm (`owner/name`) and Plex Media Server, checked daily or on demand.
+- **Sources** (first stage only): GitHub latest-release rpm (`owner/name`) and Plex Media Server, checked when added, then every 24 h (first check a minute after startup), or on demand (*Check now* / `POST /api/sources/{id}/run`).
 - **Retention:** per repo, keep only the newest N versions of each package (default limit plus per-package overrides; 0 = unlimited). Packages are grouped by name and arch and ordered with rpm's version comparison. Enforced after every upload or promotion into the repo and when the limits are saved; each stage has its own limits.
 - **Mirrors:** a repo can mirror an upstream dnf repo (see below).
 - **apt/deb repos:** a repo can be of kind `deb` instead of `rpm`: upload `.deb` files (or GitHub release `.deb` assets), promote them through stages, or mirror a Debian/Ubuntu suite. See "apt/deb repos" below.

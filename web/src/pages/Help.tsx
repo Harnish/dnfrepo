@@ -4,7 +4,7 @@ const terms: [string, string][] = [
   ['Repo', `One dnf repository, served at ${o}/r/<slug>/. The slug is its short URL name (lowercase letters, digits, dashes).`],
   ['Pipeline / stage', 'An ordered chain of repos, for example dev → test → prod. Each repo in the chain is a stage. Only the first stage takes uploads and sources.'],
   ['Promote', 'Copy chosen rpm files from a stage into the next one. All-or-nothing: if any file is a problem, none move. This is the only way a package enters a later stage.'],
-  ['Source', 'An automatic feed into a first-stage repo: the latest rpm from a GitHub project (owner/name) or from Plex Media Server. Checked daily or on demand with Run now.'],
+  ['Source', 'An automatic feed into a first-stage repo: the latest rpm from a GitHub project (owner/name) or from Plex Media Server. Checked when added, daily, or on demand with Check now.'],
   ['Access mode', 'Exactly one per repo. public: anyone. ips: only listed IPs/CIDR ranges. users: HTTP Basic auth with a repo user and token. It covers rpms, metadata, browse page, feed and .repo file.'],
   ['Repo user / token', 'A name plus a secret token that dnf clients use to pull from users-mode repos. The token is shown once when created; revoke the user to cut it off.'],
   ['.repo file', 'The client config that tells dnf where the repo is and which GPG key to use. Download it from the repo page or from the Repo users page.'],
@@ -37,7 +37,7 @@ const flows: { id: string; title: string; steps: React.ReactNode[] }[] = [
     <>Save, then <em>Sync now</em>. Clients use this server's key and the repo's sources.list line, not Debian's.</>,
   ] },
   { id: 'add-packages', title: 'Add packages', steps: [
-    <>Open the repo (it must be a first stage). Use <em>Upload rpm</em> to add a file, or add a <em>Source</em> (GitHub <code>owner/name</code> or Plex) and click <em>Run now</em>.</>,
+    <>Open the repo (it must be a first stage). Use <em>Upload rpm</em> to add a file, or add a <em>Source</em> (GitHub <code>owner/name</code> or Plex); it is checked right away, and <em>Check now</em> re-checks it.</>,
     <>The package appears under <em>Packages</em> and the repo metadata is rebuilt and signed. Delete removes a file and rebuilds again.</>,
   ] },
   { id: 'pipeline', title: 'Set up dev → test → prod', steps: [

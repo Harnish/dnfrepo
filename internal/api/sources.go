@@ -95,6 +95,9 @@ func (a *Sources) Routes(mux *http.ServeMux) {
 			errJSON(w, 500, "internal error")
 			return
 		}
+		if a.Scheduler != nil {
+			go a.Scheduler.RunOne(context.Background(), s.ID) // grab the current release now, not at the next daily tick
+		}
 		writeJSON(w, 201, toSourceJSON(s))
 	})
 	mux.HandleFunc("DELETE /api/sources/{id}", func(w http.ResponseWriter, r *http.Request) {

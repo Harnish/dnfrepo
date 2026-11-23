@@ -1,6 +1,35 @@
 package api
 
-import "testing"
+import (
+	"context"
+	"net/http"
+	"net/http/httptest"
+	"testing"
+	"time"
+
+	"dnfrepo/internal/sources"
+)
+
+// A new source is checked right away, not at the next daily tick.
+func TestAddSourceRunsImmediately(t *testing.T) {
+	e := newEnv(t)
+	gh := httptest.NewServer(http.NotFoundHandler()) // every release lookup 404s: the run records an error
+	defer gh.Close()
+	(&Repos{Store: e.St, DataDir: t.TempDir()}).Routes(e.Mux)
+	(&Sources{Store: e.St, Scheduler: &sources.Scheduler{Store: e.St, GitHubAPI: gh.URL}}).Routes(e.Mux)
+	e.Do("POST", "/api/repos", `{"slug":"dev","name":"Dev","mode":"public"}`)
+	if w := e.Do("POST", "/api/repos/dev/sources", `{"kind":"github","spec":"o/n"}`); w.Code != 201 {
+		t.Fatalf("add: %d %s", w.Code, w.Body)
+	}
+	repo, _ := e.St.RepoBySlug(context.Background(), "dev")
+	for deadline := time.Now().Add(5 * time.Second); time.Now().Before(deadline); time.Sleep(20 * time.Millisecond) {
+		ss, err := e.St.ListSources(context.Background(), repo.ID)
+		if err == nil && len(ss) == 1 && ss[0].LastRun != nil {
+			return
+		}
+	}
+	t.Fatal("source was not run after being added")
+}
 
 func TestSourceOnLaterStageRejected(t *testing.T) {
 	e := newEnv(t)
