@@ -1,13 +1,19 @@
 import { useCallback, useEffect, useState } from 'react'
-import { Link } from 'react-router-dom'
+import { Link, useSearchParams } from 'react-router-dom'
 import { api, fmtSize } from '../api'
 import type { GCStatus, RegistryRepoRow } from '../registry'
 import ImageMirrors from './ImageMirrors'
+import { FilterBox, Pager, SortTh, useTable } from './Pager'
 
 export default function Registry() {
   const [repos, setRepos] = useState<RegistryRepoRow[]>([])
   const [gc, setGC] = useState<GCStatus | null>(null)
   const [err, setErr] = useState('')
+  const [params, setParams] = useSearchParams()
+  const imgT = useTable(repos, (r, k) => r[k as keyof RegistryRepoRow] as string | number, (r) => [r.name, r.mode])
+  const tabs: [string, string][] = [['images', `Images (${repos.length})`], ['mirrors', 'Mirrors'], ['gc', 'Garbage collection']]
+  const tab = tabs.some(([k]) => k === params.get('tab')) ? params.get('tab')! : 'images'
+  const setTab = (k: string) => setParams((p) => { const n = new URLSearchParams(p); n.set('tab', k); return n }, { replace: true })
   const load = useCallback(() => {
     api.registryRepos().then(setRepos).catch((x) => setErr(x.message))
     api.gcStatus().then(setGC).catch(() => {})
@@ -38,10 +44,17 @@ export default function Registry() {
       <h1>Container registry</h1>
       <p className="muted">Images are public to pull and hidden from the public page until you tick <em>Listed</em>. Pushing always needs a <Link to="/push-tokens">push token</Link>.</p>
       {err && <p className="error">{err}</p>}
+      <nav className="tabs" role="tablist">
+        {tabs.map(([k, label]) => (
+          <button key={k} type="button" role="tab" aria-selected={tab === k} className={tab === k ? 'active' : ''} onClick={() => setTab(k)}>{label}</button>
+        ))}
+      </nav>
+      {tab === 'images' && <>
+      {repos.length > 0 && <FilterBox {...imgT.filter} />}
       <table>
-        <thead><tr><th>Image</th><th>Tags</th><th>Listed</th><th>Pull access</th></tr></thead>
+        <thead><tr><SortTh k="name" label="Image" t={imgT} /><SortTh k="tags" label="Tags" t={imgT} /><th>Listed</th><SortTh k="mode" label="Pull access" t={imgT} /></tr></thead>
         <tbody>
-          {repos.map((r) => (
+          {imgT.pg.items.map((r) => (
             <tr key={r.name}>
               <td><Link to={`/registry/repo?name=${encodeURIComponent(r.name)}`}>{r.name}</Link>{r.empty && <span className="badge"> no images</span>}</td>
               <td>{r.tags}</td>
@@ -53,11 +66,14 @@ export default function Registry() {
               </td>
             </tr>
           ))}
-          {repos.length === 0 && <tr><td colSpan={4} className="muted">No images yet. Push one with a push token.</td></tr>}
+          {repos.length > 0 && imgT.pg.total === 0 && <tr><td colSpan={4} className="muted">No matches.</td></tr>}
+          {repos.length === 0 && <tr><td colSpan={4} className="muted">No images yet. Push one with a push token, or add a mirror.</td></tr>}
         </tbody>
       </table>
-      <ImageMirrors onChanged={load} />
-      <div className="card">
+      <Pager {...imgT.pg} />
+      </>}
+      {tab === 'mirrors' && <ImageMirrors onChanged={load} />}
+      {tab === 'gc' && <div className="card">
         <h2>Garbage collection</h2>
         <p className="muted">Removes untagged manifests and unreferenced layers. Pushes are refused while it runs.</p>
         <div className="row">
@@ -65,7 +81,7 @@ export default function Registry() {
           {gc?.state === 'done' && <span className="ok">Done: removed {gc.removed} files, freed {fmtSize(gc.bytes_freed)}.</span>}
           {gc?.state === 'aborted' && <span className="error">Aborted: {gc.error}</span>}
         </div>
-      </div>
+      </div>}
     </>
   )
 }
