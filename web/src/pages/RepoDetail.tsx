@@ -128,18 +128,18 @@ export default function RepoDetail() {
       {tab === 'packages' && <>
       {pkgs.length > 0 && <FilterBox {...pkgT.filter} />}
       <table>
-        <thead><tr><th /><SortTh k="name" label="Name" t={pkgT} /><SortTh k="version" label="Version" t={pkgT} /><SortTh k="arch" label="Arch" t={pkgT} />{deb && <SortTh k="component" label="Component" t={pkgT} />}<SortTh k="size" label="Size" t={pkgT} />{cache && <SortTh k="last_pulled" label="Last pulled" t={pkgT} />}<SortTh k="filename" label="File" t={pkgT} /><th /></tr></thead>
+        <thead><tr><th /><SortTh k="name" label="Name" t={pkgT} /><SortTh k="version" label="Version" t={pkgT} /><SortTh k="arch" label="Arch" t={pkgT} />{deb && <SortTh k="component" label="Component" t={pkgT} />}<SortTh k="size" label="Size" t={pkgT} /><SortTh k="added_at" label="Added" t={pkgT} />{cache && <SortTh k="last_pulled" label="Last pulled" t={pkgT} />}<SortTh k="filename" label="File" t={pkgT} /><th /></tr></thead>
         <tbody>
           {pkgPg.items.map((p) => (
             <tr key={p.filename}>
               <td><input type="checkbox" checked={selected.has(p.filename)} onChange={() => toggle(p.filename)} aria-label={`select ${p.filename}`} /></td>
-              <td>{p.name}</td><td className="nw">{deb ? p.version : `${p.version}-${p.release}`}</td><td className="nw">{p.arch}</td>{deb && <td className="nw">{p.component}</td>}<td className="nw">{fmtSize(p.size)}</td>{cache && <td className="nw">{new Date(p.last_pulled).toLocaleString()}</td>}
+              <td>{p.name}</td><td className="nw">{deb ? p.version : `${p.version}-${p.release}`}</td><td className="nw">{p.arch}</td>{deb && <td className="nw">{p.component}</td>}<td className="nw">{fmtSize(p.size)}</td><td className="nw small muted" title={new Date(p.added_at).toLocaleString()}>{new Date(p.added_at).toLocaleDateString()}</td>{cache && <td className="nw">{new Date(p.last_pulled).toLocaleString()}</td>}
               <td><a href={deb ? `/r/${slug}/pool/${p.component}/${p.filename}` : `/r/${slug}/${p.filename}`}>{p.filename}</a></td>
               <td><button onClick={() => confirm(`Delete ${p.filename}?`) && run(async () => { await api.deletePackage(slug, p.filename); await load() })}>Delete</button></td>
             </tr>
           ))}
-          {pkgs.length > 0 && pkgPg.total === 0 && <tr><td colSpan={(deb ? 8 : 7) + (cache ? 1 : 0)} className="muted">No matches.</td></tr>}
-          {pkgs.length === 0 && <tr><td colSpan={(deb ? 8 : 7) + (cache ? 1 : 0)} className="muted">{cache ? 'Nothing cached yet: packages are stored when a host first downloads them.' : 'No packages.'}</td></tr>}
+          {pkgs.length > 0 && pkgPg.total === 0 && <tr><td colSpan={(deb ? 9 : 8) + (cache ? 1 : 0)} className="muted">No matches.</td></tr>}
+          {pkgs.length === 0 && <tr><td colSpan={(deb ? 9 : 8) + (cache ? 1 : 0)} className="muted">{cache ? 'Nothing cached yet: packages are stored when a host first downloads them.' : 'No packages.'}</td></tr>}
         </tbody>
       </table>
       <Pager {...pkgPg} />
