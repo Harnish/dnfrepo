@@ -35,7 +35,9 @@ A self-hosted package server for a homelab or small team. One Go binary (plus Po
 **Admin**
 
 - Sign-in through OpenID Connect, limited to one group; or a single local admin for a homelab. Admin API tokens for scripts.
-- The UI shows each repo in tabs (packages, sources or mirror, batches, access, retention, activity, pipeline), with sortable, filterable, paginated package and source lists.
+- The UI shows each repo in tabs (packages, sources or mirror, batches, access, retention, activity, pipeline), with sortable, filterable, paginated package and source lists. The packages list shows when each package was added.
+- Works on a phone: on narrow screens every table turns into one card per row, each value labelled with its column, and sortable columns become buttons above the cards.
+- The login page explains what dnfrepo does, for people who land on it. After sign-in, the footer shows the running version and build.
 
 ## Screenshots
 
@@ -51,7 +53,7 @@ A self-hosted package server for a homelab or small team. One Go binary (plus Po
 ## Run
 
 ```
-docker build -t dnfrepo .
+docker build --build-arg VERSION=$(git describe --tags --always) --build-arg BUILD=$(git rev-parse --short HEAD) -t dnfrepo .
 docker run -d --name dnfrepo -p 8080:8080 -v dnfrepo-data:/data \
   -e DATABASE_URL=postgres://user:pass@db/dnfrepo \
   -e BASE_URL=https://repo.example.org \
@@ -59,6 +61,8 @@ docker run -d --name dnfrepo -p 8080:8080 -v dnfrepo-data:/data \
   -e OIDC_CLIENT_ID=... -e OIDC_CLIENT_SECRET=... \
   dnfrepo
 ```
+
+`VERSION` and `BUILD` are optional; without them the UI footer and the startup log show `dev (build unknown)`. The GitHub and GitLab pipelines pass the branch and commit.
 
 ### Kubernetes (Helm)
 
@@ -209,4 +213,5 @@ Scripts authenticate with an admin API token (`Authorization: Bearer dnfr_...`, 
 | `GET/POST /api/registry/push-tokens`, `DELETE .../push-tokens/{id}` | registry push tokens |
 | `GET /api/public/registry/repos`, `GET /api/public/registry/repo?name=` | public, read-only list of Listed images (no auth) |
 | `GET/POST /api/registry/mirrors`, `PUT/DELETE .../mirrors/{id}`, `POST .../mirrors/{id}/run`, `POST .../mirrors/inspect` | registry image mirrors (see docs/api.md) |
+| `GET /api/version` | running version and build, e.g. `{"version":"v1.4.0 (build 27ac652)"}` |
 | `GET /gpg.key`, `GET /healthz` | instance signing key; health check |
