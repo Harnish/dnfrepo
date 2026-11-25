@@ -63,16 +63,16 @@ export default function ImageMirrors({ onChanged }: { onChanged: () => void }) {
       {err && <p className="error">{err}</p>}
       {msg && <p className="ok">{msg}</p>}
       <table>
-        <thead><tr><th>Upstream</th><th>Local image</th><th>Platforms</th><th>Keep</th><th>Last run</th><th>Status</th><th /></tr></thead>
+        <thead><tr className="nw"><th>Upstream</th><th>Local image</th><th>Platforms</th><th>Keep</th><th>Last run</th><th>Status</th><th /></tr></thead>
         <tbody>
           {rows.map((m) => (
             <tr key={m.id}>
               <td>{m.upstream}:{m.tag}{m.has_credentials && <span className="badge"> credentials</span>}</td>
               <td>{m.local_name}:{m.tag}</td>
-              <td>{m.platforms.length ? m.platforms.join(', ') : 'all'}</td>
-              <td>{m.keep}</td>
+              <td className="ww">{m.platforms.length ? m.platforms.join(', ') : 'all'}</td>
+              <td className="nw">{m.keep}</td>
               <td className="nw">{m.last_run ? new Date(m.last_run).toLocaleString() : 'never'}</td>
-              <td>{m.last_status || '—'}{m.last_error && <span className="error"> {m.last_error}</span>}{m.upstream_digest && <div className="muted"><code>{m.upstream_digest.slice(7, 19)}</code></div>}</td>
+              <td className="ww">{m.last_status || '—'}{m.last_error && <span className="error"> {m.last_error}</span>}{m.upstream_digest && <div className="muted"><code>{m.upstream_digest.slice(7, 19)}</code></div>}</td>
               <td className="nw">
                 <button onClick={() => run(async () => { await api.runImageMirror(m.id); later() }, 'Check started.')}>Check now</button>{' '}
                 <button onClick={() => edit(m)}>Edit</button>{' '}

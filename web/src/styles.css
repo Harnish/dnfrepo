@@ -25,11 +25,29 @@ a.button { display:inline-block; padding:.4rem .6rem; border-radius:6px; text-de
 pre { background:var(--bg); padding:.6rem; border-radius:6px; overflow-x:auto; } code { overflow-wrap:anywhere; }
 fieldset { border:1px solid var(--line); border-radius:6px; margin:.5rem 0; }
 .audit { list-style:none; padding:0; } .audit li { padding:.2rem 0; border-bottom:1px solid var(--line); }
-@media (max-width:600px) { main { padding:.75rem; } }
+header nav { flex-wrap:wrap; row-gap:.25rem; }
+@media (max-width:700px) {
+  main { padding:.75rem; }
+  header { gap:.5rem 1rem; padding:.5rem .75rem; } header nav { gap:.4rem .9rem; }
+  /* tables become one card per row; data-label (set in cards.ts) names each field */
+  table, tbody, tr, td { display:block; }
+  thead { display:block; } thead tr { display:flex; flex-wrap:wrap; gap:.4rem; }
+  thead th { display:none; border:0; padding:0; } thead th:has(.th-sort) { display:block; }
+  thead .th-sort { border:1px solid var(--line); border-radius:6px; padding:.3rem .6rem; background:var(--card); }
+  tbody tr { background:var(--card); border:1px solid var(--line); border-radius:8px; padding:.5rem .75rem; margin:.5rem 0; }
+  td { border:0; padding:.15rem 0; } td.nw { white-space:normal; } td:empty { display:none; }
+  td[data-label] { position:relative; padding-left:7rem; }
+  td[data-label]::before { content:attr(data-label); position:absolute; left:0; width:6.5rem; color:var(--muted); font-size:.85rem; }
+  /* 16px stops iOS zooming on focus; fields fill the width */
+  input,select,textarea { font-size:16px; }
+  label > input:not([type=checkbox]), label > select, label > textarea, .filter input { width:100%; min-width:0; }
+  .row > label:not(.inline) { flex:1 1 100%; }
+}
 .toc ul { margin:.25rem 0 .5rem; padding-left:1.2rem; } section { scroll-margin-top:1rem; } dd { margin:0 0 .75rem; color:var(--muted); } ol li { margin:.35rem 0; }
 .tabs { display:flex; gap:.25rem; flex-wrap:wrap; border-bottom:1px solid var(--line); margin:1rem 0 .75rem; }
 .tabs button { border:1px solid transparent; border-bottom:none; border-radius:6px 6px 0 0; background:none; margin-bottom:-1px; }
 .tabs button.active { border-color:var(--line); background:var(--card); font-weight:600; }
 .pager { align-items:center; }
 .nw, td button { white-space:nowrap; overflow-wrap:normal; }
+.ww { overflow-wrap:normal; } /* wrap at spaces only, never mid-word */
 .th-sort { background:none; border:none; padding:0; font:inherit; font-weight:600; color:inherit; } .filter input { min-width:16rem; }
