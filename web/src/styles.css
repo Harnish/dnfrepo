@@ -57,3 +57,4 @@ header nav { flex-wrap:wrap; row-gap:.25rem; }
 .pitch ul { padding-left:1.1rem; } .pitch li { margin:.5rem 0; }
 .signin { flex:0 1 22rem; margin:0; } .signin input { width:100%; margin:.25rem 0; }
 @media (max-width:700px) { .signin { order:-1; flex-basis:100%; } .landing { margin:.5rem 0; gap:1.25rem; } }
+footer { max-width:64rem; margin:2rem auto 1rem; padding:0 1rem; }

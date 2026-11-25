@@ -3,6 +3,7 @@ package main
 
 import (
 	"context"
+	"fmt"
 	"log"
 	"net/http"
 	"os"
@@ -127,7 +128,8 @@ func main() {
 		Mirrors:   &api.Mirrors{Store: st, Syncer: syncer, Box: box, Actor: actor, OnChange: rebuild},
 		Serve: serve.Handler(serve.Deps{Store: st, RepoDir: pub.RepoDir, PublicKey: sg.PublicKeyArmored(),
 			BaseURL: cfg.BaseURL, Trusted: cfg.TrustedProxies, Fetch: syncer.Fetch}),
-		Static: web.Dist(),
+		Static:  web.Dist(),
+		Version: fmt.Sprintf("%s (build %s)", Version, Build),
 	})
 
 	srv := &http.Server{Addr: cfg.ListenAddr, Handler: handler, ReadHeaderTimeout: 10 * time.Second}

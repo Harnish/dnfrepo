@@ -75,6 +75,7 @@ var adminRoutes = []struct{ method, path string }{
 	{"DELETE", "/api/sources/1"}, {"POST", "/api/sources/1/run"},
 	{"POST", "/api/mirror/parse-repo"}, {"GET", "/api/repos/dev/mirror"}, {"PUT", "/api/repos/dev/mirror"},
 	{"DELETE", "/api/repos/dev/mirror"}, {"POST", "/api/repos/dev/mirror/sync"}, {"GET", "/api/repos/dev/batches"},
+	{"GET", "/api/version"},
 }
 
 func TestAdminRoutesRequireSessionAndCSRFHeader(t *testing.T) {
@@ -221,5 +222,13 @@ func TestRouterWithoutRegistryServesSPAForV2(t *testing.T) {
 	_, h, _ := routerEnv(t)
 	if w := call(h, "GET", "/v2/", nil, false); !strings.Contains(w.Body.String(), "SPA") {
 		t.Fatalf("%d %q", w.Code, w.Body)
+	}
+}
+
+func TestVersionForAdmins(t *testing.T) {
+	e, h, _ := routerEnvWith(t, func(d *Deps) { d.Version = "v1.2.3 (build abc123)" })
+	w := call(h, "GET", "/api/version", e, false)
+	if w.Code != 200 || !strings.Contains(w.Body.String(), `"version":"v1.2.3 (build abc123)"`) {
+		t.Fatalf("version: %d %s", w.Code, w.Body.String())
 	}
 }

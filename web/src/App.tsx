@@ -18,6 +18,7 @@ export default function App() {
   const loc = useLocation()
   const [email, setEmail] = useState<string | null>(null)
   const [checked, setChecked] = useState(false)
+  const [version, setVersion] = useState('')
   const open = isOpenPath(loc.pathname)
 
   useEffect(() => {
@@ -27,6 +28,10 @@ export default function App() {
   useEffect(() => {
     api.me().then((m) => setEmail(m.email)).catch(() => {}).finally(() => setChecked(true))
   }, [])
+
+  useEffect(() => {
+    if (email) api.version().then((v) => setVersion(v.version)).catch(() => {})
+  }, [email])
 
   if (!checked) return <p className="muted pad">Loading…</p>
   if (!email && !open) return <Navigate to="/login" replace />
@@ -63,6 +68,7 @@ export default function App() {
           <Route path="/help" element={<Help />} />
         </Routes>
       </main>
+      {email && version && <footer className="muted small">dnfrepo {version}</footer>}
     </>
   )
 }

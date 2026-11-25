@@ -21,6 +21,7 @@ type Deps struct {
 	V2        http.Handler // registry /v2/ API; nil unless the registry is enabled
 	Serve     http.Handler // serve.Handler: /r/... and /gpg.key
 	Static    fs.FS        // built React app (index.html at root)
+	Version   string       // build version shown to admins
 }
 
 // Router mounts: /healthz; public OIDC login endpoints; admin API behind session + CSRF
@@ -46,6 +47,9 @@ func Router(d Deps) http.Handler {
 	d.Packages.RoutesDedup(admin)
 	d.Sources.Routes(admin)
 	d.Mirrors.Routes(admin)
+	admin.HandleFunc("GET /api/version", func(w http.ResponseWriter, r *http.Request) {
+		writeJSON(w, 200, map[string]string{"version": d.Version})
+	})
 	if d.Registry != nil {
 		d.Registry.Routes(admin)
 		regPublic := http.NewServeMux()
