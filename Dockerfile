@@ -11,7 +11,8 @@ COPY go.mod go.sum ./
 RUN go mod download
 COPY . .
 COPY --from=web /web/dist ./web/dist
-RUN CGO_ENABLED=0 go build -ldflags="-s -w" -o /dnfrepo ./cmd/dnfrepo
+ARG VERSION=dev BUILD=unknown
+RUN CGO_ENABLED=0 go build -ldflags="-s -w -X main.Version=${VERSION} -X main.Build=${BUILD}" -o /dnfrepo ./cmd/dnfrepo
 
 # Alpine's stable repos have no createrepo_c; Fedora minimal ships it natively.
 FROM registry.fedoraproject.org/fedora-minimal:42

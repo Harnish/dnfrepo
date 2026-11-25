@@ -28,6 +28,9 @@ import (
 	"dnfrepo/web"
 )
 
+// Stamped at build time with -ldflags -X (see Dockerfile).
+var Version, Build = "dev", "unknown"
+
 func main() {
 	cfg, err := config.Load(os.Getenv)
 	if err != nil {
@@ -134,7 +137,7 @@ func main() {
 		defer c()
 		srv.Shutdown(sctx)
 	}()
-	log.Printf("dnfrepo listening on %s", cfg.ListenAddr)
+	log.Printf("dnfrepo %s (build %s) listening on %s", Version, Build, cfg.ListenAddr)
 	if err := srv.ListenAndServe(); err != http.ErrServerClosed {
 		log.Fatal(err)
 	}
