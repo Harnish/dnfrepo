@@ -52,3 +52,8 @@ header nav { flex-wrap:wrap; row-gap:.25rem; }
 .ww { overflow-wrap:normal; } /* wrap at spaces only, never mid-word */
 .th-sort { background:none; border:none; padding:0; font:inherit; font-weight:600; color:inherit; } .filter input { min-width:16rem; }
 .small { font-size:.85rem; }
+.landing { display:flex; gap:2rem; align-items:flex-start; flex-wrap:wrap; margin:2rem 0; }
+.pitch { flex:1 1 22rem; } .pitch h1 { font-size:1.9rem; margin-top:0; } .lead { font-size:1.1rem; }
+.pitch ul { padding-left:1.1rem; } .pitch li { margin:.5rem 0; }
+.signin { flex:0 1 22rem; margin:0; } .signin input { width:100%; margin:.25rem 0; }
+@media (max-width:700px) { .signin { order:-1; flex-basis:100%; } .landing { margin:.5rem 0; gap:1.25rem; } }
